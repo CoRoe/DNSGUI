@@ -10,6 +10,55 @@ import re
 # https://www.tutorialspoint.com/python/tk_entry.htm
 #
 
+
+class DNSselector(tk.Tk):
+    def __init__(self, parent, row, text, values, **paddings):
+        super(DNSselector, self).__init__()
+
+        self.__parent = parent
+        self.__row = row
+        self.__text = text
+        self.__values = values
+        self.__paddings = paddings
+        self.__var = tk.StringVar(self)
+
+        self.create_widgets()
+
+
+    def create_widgets(self):
+        # Creates a label with the explanatory text, an option menu (to select
+        # the DNS provider), and an entry field (chosen IP address)
+        print("create_widgets", self.__text, self.__row)
+        self.__label = ttk.Label(self.__parent, text=self.__text)
+        self.__label.grid(row=self.__row, column=0, sticky='W',
+                          **self.__paddings)
+
+        print([q[0] for q in self.__values])
+        self.__var.set('Quad9')
+
+        self.__servers_var = tk.StringVar()
+        self.__servers = ttk.Combobox(self.__parent,
+                                      textvariable=self.__servers_var)
+        self.__servers['values'] = [q[0] for q in self.__values]
+        self.__servers['state'] = 'readonly'
+        self.__servers.bind('<<ComboboxSelected>>', self.on_server_changed)
+        self.__servers.grid(row=self.__row, column=1, sticky='W',
+                                **self.__paddings)
+
+        self.__ipaddr_var = tk.StringVar()
+        self.__ipaddr = tk.Entry(self.__parent, textvariable=self.__ipaddr_var)
+        self.__ipaddr.grid(row=self.__row, column=2)
+
+
+    def on_server_changed(self, event):
+        #print('On server changed', event)
+        server = self.__servers_var.get()
+        #print("New value:", server)
+        i = [q[0] for q in self.__values].index(server)
+        ipaddr = self.__values[i][1]
+        self.__ipaddr_var.set(ipaddr)
+
+
 class RootWindow(tk.Tk):
 
     DNSproviders = [['Quad9',      '9.9.9.9'],
@@ -97,7 +146,7 @@ class RootWindow(tk.Tk):
                                             *[q[0] for q in self.DNSproviders])
         self.DNSOptionMenu.grid(row=row, column=1, sticky='W',
                                 **RootWindow.paddings)
-        self.DNSIPentry = tk. Entry(self)
+        self.DNSIPentry = tk.Entry(self)
         self.DNSIPentry.insert(0, self.DNS)
         self.DNSIPentry.grid(row=row, column=2)
 
@@ -148,6 +197,20 @@ class RootWindow(tk.Tk):
                                                *self.DNSSECvalues)
         self.DNSSECoptionMenu.grid(row=row, column=1, sticky=tk.W,
                                    **RootWindow.paddings)
+
+        row = row + 1
+        self.x1 = DNSselector(self, row=row, text='DNS server',
+                              values=RootWindow.DNSproviders,
+                              **RootWindow.paddings)
+        row = row + 1
+        self.x2 = DNSselector(self, row=row, text='Fallback DNS servers',
+                              values=RootWindow.DNSproviders,
+                              **RootWindow.paddings)
+        row = row + 1
+        self.x3 = DNSselector(self, row=row, text='',
+                              values=RootWindow.DNSproviders,
+                              **RootWindow.paddings)
+
 
         row = row + 1
         button = tk.Button(text="Apply", command=self.write_config)
