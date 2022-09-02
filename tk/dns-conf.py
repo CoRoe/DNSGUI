@@ -9,7 +9,9 @@ import re
 # https://www.pythontutorial.net/tkinter/tkinter-optionmenu/
 # https://www.tutorialspoint.com/python/tk_entry.htm
 #
-
+# TODO Think of some method
+#
+#
 
 class DNSselector(tk.Tk):
     def __init__(self, parent, row, text, values, **paddings):
@@ -59,6 +61,37 @@ class DNSselector(tk.Tk):
         self.__ipaddr_var.set(ipaddr)
 
 
+class EnumSelector(tk.Tk):
+    def __init__(self, parent, row, text, values, initial_value, **paddings):
+        super(EnumSelector, self).__init__()
+
+        self.__parent = parent
+        self.__row = row
+        self.__text = text
+        self.__values = values
+        self.__initial_value = initial_value
+        self.__paddings = paddings
+        self.__value = tk.StringVar(self)
+        self.__value.set(initial_value)
+
+        self.create_widgets()
+
+
+    def create_widgets(self):
+        print("EnumSelector", self.__row, self.__text)
+        self.__label = ttk.Label(self.__parent, text=self.__text)
+        self.__label.grid(row=self.__row, column=0, sticky='W',
+                          **self.__paddings)
+
+        self.__value_sel = ttk.Combobox(self.__parent,
+                                        textvariable=self.__value)
+        self.__value_sel.grid(row=self.__row, column=1, sticky='W',
+                          **self.__paddings)
+        self.__value_sel.set(self.__initial_value)
+        self.__value_sel['values'] = self.__values
+        self.__value_sel['state'] = 'readonly'
+
+
 class RootWindow(tk.Tk):
 
     DNSproviders = [['Quad9',      '9.9.9.9'],
@@ -72,7 +105,6 @@ class RootWindow(tk.Tk):
     #
     def __init__(self):
         super(RootWindow, self).__init__()
-
 
         # Set default values.
         self.DNS = ''
@@ -133,72 +165,10 @@ class RootWindow(tk.Tk):
     def create_widgets(self):
         self.title("DNS Configuration")
         #self.minsize(500,400)
-        p = [q[0] for q in RootWindow.DNSproviders]
-        print(p)
+        #p = [q[0] for q in RootWindow.DNSproviders]
+        #print(p)
+
         row = 0
-
-        # DNS server address and provider
-        label = ttk.Label(self, text='DNS server (e.g. "9.9.9.9")')
-        label.grid(row=row, column=0, sticky='W', **RootWindow.paddings)
-        self.DNSvar = tk.StringVar(self)
-        self.DNSOptionMenu = ttk.OptionMenu(self,
-                                            self.DNSvar,
-                                            *[q[0] for q in self.DNSproviders])
-        self.DNSOptionMenu.grid(row=row, column=1, sticky='W',
-                                **RootWindow.paddings)
-        self.DNSIPentry = tk.Entry(self)
-        self.DNSIPentry.insert(0, self.DNS)
-        self.DNSIPentry.grid(row=row, column=2)
-
-        # First fallback DNS server address and provider
-        row = row + 1
-        label = ttk.Label(self, text='Fallback DNS servers')
-        label.grid(row=row, column=0, sticky='W', **RootWindow.paddings)
-        self.DNS1var = tk.StringVar(self)
-        self.DNS1OptionMenu = ttk.OptionMenu(self,
-                                            self.DNS1var,
-                                            *[q[0] for q in self.DNSproviders])
-        self.DNS1OptionMenu.grid(row=row, column=1, sticky='W',
-                                 **RootWindow.paddings)
-        self.DNSIP1entry = tk. Entry(self)
-        self.DNSIP1entry.insert(0, self.DNS1)
-        self.DNSIP1entry.grid(row=row, column=2)
-
-        # Second fallback DNS server address and provider
-        row = row + 1
-        self.DNS2var = tk.StringVar(self)
-        self.DNS2OptionMenu = ttk.OptionMenu(self,
-                                            self.DNS2var,
-                                            *[q[0] for q in self.DNSproviders])
-        self.DNS2OptionMenu.grid(row=row, column=1, sticky='W',
-                                 **RootWindow.paddings)
-        self.DNSIP2entry = tk. Entry(self)
-        self.DNSIP2entry.insert(0, self.DNS2)
-        self.DNSIP2entry.grid(row=row, column=2)
-
-        row = row + 1
-        label = ttk.Label(self, text='DNS over TLS:')
-        label.grid(row=row, column=0, sticky='W', **RootWindow.paddings)
-        self.DNSOverTLSvalues = ['no', 'yes', 'opportunistic']
-        self.DNSOverTLSvar = tk.StringVar(self)
-        self.DNSOverTLSoptionMenu = ttk.OptionMenu(self, self.DNSOverTLSvar,
-                                                   self.DNSOverTLSvalues[0],
-                                                   *self.DNSOverTLSvalues)
-        self.DNSOverTLSoptionMenu.grid(row=row, column=1, sticky=tk.W,
-                                       **RootWindow.paddings)
-
-        row = row + 1
-        label = ttk.Label(self, text='DNSSEC:')
-        label.grid(row=row, column=0, sticky='W',**RootWindow.paddings)
-        self.DNSSECvalues = ['no', 'yes', 'allow-downgrade']
-        self.DNSSECvar = tk.StringVar(self)
-        self.DNSSECoptionMenu = ttk.OptionMenu(self, self.DNSSECvar,
-                                               self.DNSSECvalues[0],
-                                               *self.DNSSECvalues)
-        self.DNSSECoptionMenu.grid(row=row, column=1, sticky=tk.W,
-                                   **RootWindow.paddings)
-
-        row = row + 1
         self.x1 = DNSselector(self, row=row, text='DNS server',
                               values=RootWindow.DNSproviders,
                               **RootWindow.paddings)
@@ -211,6 +181,17 @@ class RootWindow(tk.Tk):
                               values=RootWindow.DNSproviders,
                               **RootWindow.paddings)
 
+        row = row + 1
+        self.x4 = EnumSelector(self, row=row, text='DNS over TLS',
+                               values=['no', 'yes', 'opportunistic'],
+                               initial_value = self.DNSOverTLS,
+                               **RootWindow.paddings)
+
+        row = row + 1
+        self.x5 = EnumSelector(self, row=row, text='DNSSEC',
+                               values=['no', 'yes', 'allow-downgrade'],
+                               initial_value = self.DNSSEC,
+                               **RootWindow.paddings)
 
         row = row + 1
         button = tk.Button(text="Apply", command=self.write_config)
