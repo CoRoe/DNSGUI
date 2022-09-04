@@ -9,12 +9,15 @@ import re
 # https://www.pythontutorial.net/tkinter/tkinter-optionmenu/
 # https://www.tutorialspoint.com/python/tk_entry.htm
 #
-# TODO Think of some method
-#
-# TODO Move widget create into the constructor so that no intermediate
-# instance variables are needed.
-#
 # TODO Allow white space around the '=' signs in the configuration file.
+#
+# TODO Assign default values to all variables so that they have sensible
+# values even when not present in resolved.conf.
+#
+# TODO Make sure that all variable/value pairs are written to resolved.conf.
+#
+# TODO Check if one or more variables have been modified after they have been
+# read from the file.
 #
 
 class DNSselector(tk.Tk):
@@ -45,11 +48,6 @@ class DNSselector(tk.Tk):
         self.__ipaddr = tk.Entry(parent, textvariable=self.__ipaddr_var)
         self.__ipaddr.grid(row=row, column=2)
 
-        # TODO Handle changes of the text in the entry field. Something like
-        #         self.entry.bind('<Key-Return>', self.on_changed)
-
-        # validatecommand is invoked on pressing ENTER, not when the element
-        # loses focus.
         self.__ipaddr.bind('<Key-Return> ', self.on_ip_changed)
         self.__ipaddr.bind('<FocusOut> ', self.on_ip_changed)
 
@@ -225,16 +223,18 @@ class RootWindow(tk.Tk):
     def write_config(self):
         try:
             with open('/etc/systemd/resolved.conf', 'r') as f_in:
-                for line in f_in:
-                    m = re.match('^([A-Za-z]+)=', line)
-                    if m:
-                        var = m.group(1)
-                        if var in self.__handlers:
-                            print("{}={}".format(var, self.__handlers[var].get()))
+                with open('/tmp/resolved.conf', 'w') as f_out:
+                    for line in f_in:
+                        m = re.match('^([A-Za-z]+)=', line)
+                        if m:
+                            var = m.group(1)
+                            if var in self.__handlers:
+                                f_out.write(
+                                      "{}={}\n".format(var, self.__handlers[var].get()))
+                            else:
+                                f_out.write(line)
                         else:
-                            print(line[:-1])
-                    else:
-                        print(line[:-1])
+                            f_out.write(line)
         except IOErr as e:
             print("Cannot open", e)
 
