@@ -24,7 +24,9 @@ class DNSselector(tk.Tk):
     def __init__(self, parent, row, text, values, **paddings):
         super(DNSselector, self).__init__()
 
+        self.__parent = parent
         self.__values = values
+        self.__value0 = ''
 
         # Creates a label with the explanatory text, an option menu (to select
         # the DNS provider), and an entry field (chosen IP address)
@@ -56,6 +58,7 @@ class DNSselector(tk.Tk):
         return self.__ipaddr_var.get()
 
     def set(self, value):
+        self.__value0 = value
         print("Set '{}'".format(value))
         self.__ipaddr_var.set(value)
         provider = self.__provider_from_ip(value)
@@ -86,6 +89,7 @@ class DNSselector(tk.Tk):
         ipaddr = self.__ip_from_provider(server)
         self.__ipaddr_var.set(ipaddr)
 
+
     # Invoked when the IP address might have changed. The method updates the
     # server name according ly.
     def on_ip_changed(self, event):
@@ -94,17 +98,34 @@ class DNSselector(tk.Tk):
         provider = self.__provider_from_ip(ip)
         print(provider)
         self.__servers_var.set(provider)
+        self.__parent.on_value_changed()
+
+
+    # Called after the value has been successfully saved. The instance is
+    # flagged as 'not modified'.
+    def config_written(self):
+        self.__value0 = self.__ipaddr_var.get()
+
+
+    # Checks if a widget's value has been modified and needs to be saved.
+    def is_modified(self):
+        print("DNSselector.is_modified: v0={}, v={}".format( self.__value0,
+                                                             self.__ipaddr_var.get()))
+        return self.__value0 != self.__ipaddr_var.get()
 
 
 class EnumSelector(tk.Tk):
     def __init__(self, parent, row, text, values, **paddings):
         super(EnumSelector, self).__init__()
 
-        self.__value = tk.StringVar(self)
+        self.__parent = parent
+        self.__value0 = ''
+
         self.__label = ttk.Label(parent, text=text)
         self.__label.grid(row=row, column=0, sticky='W',
                          ** paddings)
 
+        self.__value = tk.StringVar(self, '')
         self.__value_sel = ttk.Combobox(parent,
                                         textvariable=self.__value)
         self.__value_sel.grid(row=row, column=1, sticky='W',
@@ -112,16 +133,30 @@ class EnumSelector(tk.Tk):
         self.__value_sel['values'] = values
         self.__value_sel['state'] = 'readonly'
 
+        self.__value_sel.bind('<<ComboboxSelected>> ', self.__on_value_changed)
+
     def get(self):
         return self.__value_sel.get()
 
     def set(self, v):
-        print("Set", v)
         self.__value_sel.set(v)
+        self.__value0 = v
+        print("EnumSelector.set: ", self.__value0, self.__value_sel.get())
 
+    # Called after the value has been successfully saved. The instance is
+    # flagged as 'not modified'.
+    def config_written(self):
+        self.__value0 = self.__value_sel.get()
+
+    # Checks i the value has been modified.
     def is_modified(self):
-        # TODO Expand definition
-        return True
+        print("EnumSelector.is_modified:",
+              self.__value0, self.__value_sel.get())
+        return self.__value0 != self.__value_sel.get()
+
+    def __on_value_changed(self, event):
+        print("EnumSelector.on_value_changed:")
+        self.__parent.on_value_changed()
 
 
 class RootWindow(tk.Tk):
@@ -150,8 +185,8 @@ class RootWindow(tk.Tk):
 
         self.__handlers = {}
 
-        self.create_widgets()
-        self.read_config('/etc/systemd/resolved.conf')
+        self.__create_widgets()
+        self.__read_config('/etc/systemd/resolved.conf')
         #self.write_config()
 
     #
@@ -192,7 +227,7 @@ class RootWindow(tk.Tk):
     #
     # Read the DNS configuration from /etc/systemd/resolved.conf
     #
-    def read_config(self, fn):
+    def __read_config(self, fn):
         print("Reading configuration ...")
         try:
             with open(fn, 'r') as ifile:
@@ -220,7 +255,7 @@ class RootWindow(tk.Tk):
     #
     # TODO Handle the case that the original file does not define all keys.
     #
-    def write_config(self):
+    def __write_config(self):
         try:
             with open('/etc/systemd/resolved.conf', 'r') as f_in:
                 with open('/tmp/resolved.conf', 'w') as f_out:
@@ -239,11 +274,42 @@ class RootWindow(tk.Tk):
             print("Cannot open", e)
 
 
+    # Tests whether any value has been modified
+    def __any_value_modified(self):
+        for i in self.__handlers:
+            if self.__handlers[i].is_modified():
+               return True
+        return False
+
+
+    # Called by widgets when their values changes
+    def on_value_changed(self):
+        m = self.__any_value_modified()
+        print("Value of some widget has changed!", m)
+        if m:
+            self.b_apply['state'] = tk.NORMAL
+        else:
+            self.b_apply['state'] = tk.DISABLED
+
+
+    # Called by widgets when the 'apply' button is pressed
+    def __on_apply(self):
+        print("on_apply")
+        if self.__any_value_modified():
+            print("... something changed")
+            self.__write_config()
+            for i in self.__handlers:
+                self.__handlers[i].config_written()
+        else:
+            print("... nothing changed")
+        self.b_apply['state'] = tk.DISABLED
+
+
     #
     # Create the widgets and initialise them with the values read from the
     # conf file.
     #
-    def create_widgets(self):
+    def __create_widgets(self):
         self.title("DNS Configuration")
         #self.minsize(500,400)
         #p = [q[0] for q in RootWindow.DNSproviders]
@@ -257,7 +323,7 @@ class RootWindow(tk.Tk):
         self.__handlers['DNS'] = h
 
         row = row + 1
-        h = DNSselector(self, row=row, text='Fallback DNS servers',
+        h = DNSselector(self, row=row, text='Fallback DNS server',
                         values=RootWindow.DNSproviders,
                         #initial_value='',
                         **RootWindow.paddings)
@@ -278,8 +344,9 @@ class RootWindow(tk.Tk):
         self.__handlers['DNSSEC'] = h
 
         row = row + 1
-        button = tk.Button(text="Apply", command=self.write_config)
-        button.grid(row=row, column=2, sticky=tk.E, **RootWindow.paddings)
+        self.b_apply = tk.Button(text="Apply", command=self.__on_apply)
+        self.b_apply['state'] = tk.DISABLED
+        self.b_apply.grid(row=row, column=2, sticky=tk.E, **RootWindow.paddings)
 
         button = tk.Button(text="Close", command=quit)
         button.grid(row=row, column=3, sticky=tk.W, **RootWindow.paddings)
