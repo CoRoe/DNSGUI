@@ -3,6 +3,8 @@
 import tkinter as tk
 from tkinter import ttk
 import re
+import argparse
+
 
 #
 # https://web.archive.org/web/20201112011230/http://effbot.org/tkinterbook/grid.htm
@@ -26,7 +28,7 @@ class DNSselector(tk.Tk):
 
         self.__parent = parent
         self.__values = values
-        self.__value0 = ''
+        self.__ipaddr0 = values[0][1]
 
         # Creates a label with the explanatory text, an option menu (to select
         # the DNS provider), and an entry field (chosen IP address)
@@ -58,7 +60,7 @@ class DNSselector(tk.Tk):
         return self.__ipaddr_var.get()
 
     def set(self, value):
-        self.__value0 = value
+        self.__ipaddr0 = value
         print("Set '{}'".format(value))
         self.__ipaddr_var.set(value)
         provider = self.__provider_from_ip(value)
@@ -88,6 +90,7 @@ class DNSselector(tk.Tk):
         i = [q[0] for q in self.__values].index(server)
         ipaddr = self.__ip_from_provider(server)
         self.__ipaddr_var.set(ipaddr)
+        self.__parent.on_value_changed()
 
 
     # Invoked when the IP address might have changed. The method updates the
@@ -104,14 +107,14 @@ class DNSselector(tk.Tk):
     # Called after the value has been successfully saved. The instance is
     # flagged as 'not modified'.
     def config_written(self):
-        self.__value0 = self.__ipaddr_var.get()
+        self.__ipaddr0 = self.__ipaddr_var.get()
 
 
     # Checks if a widget's value has been modified and needs to be saved.
     def is_modified(self):
-        print("DNSselector.is_modified: v0={}, v={}".format( self.__value0,
+        print("DNSselector.is_modified: v0={}, v={}".format( self.__ipaddr0,
                                                              self.__ipaddr_var.get()))
-        return self.__value0 != self.__ipaddr_var.get()
+        return self.__ipaddr0 != self.__ipaddr_var.get()
 
 
 class EnumSelector(tk.Tk):
@@ -119,15 +122,19 @@ class EnumSelector(tk.Tk):
         super(EnumSelector, self).__init__()
 
         self.__parent = parent
-        self.__value0 = ''
+
+        self.__value0 = values[0]
+        self.__value = tk.StringVar(self)
 
         self.__label = ttk.Label(parent, text=text)
         self.__label.grid(row=row, column=0, sticky='W',
-                         ** paddings)
+                          ** paddings)
 
-        self.__value = tk.StringVar(self, '')
         self.__value_sel = ttk.Combobox(parent,
                                         textvariable=self.__value)
+
+        # Initialise with the 1st value of the list of valid values:
+        self.__value_sel.set(values[0])
         self.__value_sel.grid(row=row, column=1, sticky='W',
                               **paddings)
         self.__value_sel['values'] = values
@@ -180,48 +187,15 @@ class RootWindow(tk.Tk):
     #
     # Class constructor
     #
-    def __init__(self):
+    def __init__(self, config_fn, run_as_root):
         super(RootWindow, self).__init__()
 
         self.__handlers = {}
+        self.__config_fn = config_fn
 
         self.__create_widgets()
-        self.__read_config('/etc/systemd/resolved.conf')
+        self.__read_config(self.__config_fn)
         #self.write_config()
-
-    #
-    # Read the DNS configuration from /etc/systemd/resolved.conf
-    #
-    def read_config_old(self, fn):
-        print("Reading configuration ...")
-        try:
-            with open(fn, 'r') as ifile:
-                for line in ifile:
-                    #print(line)
-                    # DNS server address in dotted notation
-                    m = re.match('^DNS=((\\d+\\.){3}\\d+)', line)
-                    if m:
-                        self.DNS = m.group(1)
-                        print(m.group(1))
-
-                    # One or two addresses in dotted notation, separated by
-                    # space.
-                    m = re.match('^FallbackDNS=((\\d+\\.){3}\\d+)', line)
-                    if m:
-                        self.DNS1 = m.group(1)
-                        print(m.group(1))
-
-                    m = re.match('^DNSOverTLS=([a-z]+)', line)
-                    if m:
-                        self.DNSOverTLS = m.group(1)
-                        print(m.group(1))
-
-                    m = re.match('^DNSSEC=([a-z]+)', line)
-                    if m:
-                        self.DNSSEC = m.group(1)
-                        print(m.group(1))
-        except IOErr as e:
-            print("Cannot open", fn, e)
 
 
     #
@@ -259,6 +233,7 @@ class RootWindow(tk.Tk):
         try:
             with open('/etc/systemd/resolved.conf', 'r') as f_in:
                 with open('/tmp/resolved.conf', 'w') as f_out:
+                    updated_vars = set()
                     for line in f_in:
                         m = re.match('^([A-Za-z]+)=', line)
                         if m:
@@ -266,10 +241,19 @@ class RootWindow(tk.Tk):
                             if var in self.__handlers:
                                 f_out.write(
                                       "{}={}\n".format(var, self.__handlers[var].get()))
+                                updated_vars.add(var)
                             else:
                                 f_out.write(line)
                         else:
                             f_out.write(line)
+                    # resolved.conf might not define all
+                    for var in self.__handlers:
+                        if not var in updated_vars:
+                            print("Missing:", var)
+                            # TODO Must have a default value; otherwise an
+                            # empty value would be written to resolved.conf.
+                            f_out.write(
+                                      "{}={}\n".format(var, self.__handlers[var].get()))
         except IOErr as e:
             print("Cannot open", e)
 
@@ -318,30 +302,32 @@ class RootWindow(tk.Tk):
         row = 0
         h = DNSselector(self, row=row, text='DNS server',
                         values=RootWindow.DNSproviders,
-                        #initial_value=self.DNS,
                         **RootWindow.paddings)
         self.__handlers['DNS'] = h
 
         row = row + 1
         h = DNSselector(self, row=row, text='Fallback DNS server',
                         values=RootWindow.DNSproviders,
-                        #initial_value='',
                         **RootWindow.paddings)
         self.__handlers['FallbackDNS'] = h
 
         row = row + 1
         h = EnumSelector(self, row=row, text='DNS over TLS',
                          values=['no', 'yes', 'opportunistic'],
-                         #initial_value = self.DNSOverTLS,
                          **RootWindow.paddings)
         self.__handlers['DNSOverTLS'] = h
 
         row = row + 1
         h = EnumSelector(self, row=row, text='DNSSEC',
                          values=['no', 'yes', 'allow-downgrade'],
-                         #initial_value = self.DNSSEC,
                          **RootWindow.paddings)
         self.__handlers['DNSSEC'] = h
+
+        row = row + 1
+        h = EnumSelector(self, row=row, text='Quark',
+                         values=['no', 'yes', 'allow-downgrade'],
+                         **RootWindow.paddings)
+        self.__handlers['Quark'] = h
 
         row = row + 1
         self.b_apply = tk.Button(text="Apply", command=self.__on_apply)
@@ -353,5 +339,18 @@ class RootWindow(tk.Tk):
 
 
 if __name__ == '__main__':
-    root_window = RootWindow()
+    parser = argparse.ArgumentParser(description='Display and modify settings '
+                                     'of the systemd DNS resolver.')
+    parser.add_argument('--config',
+                        default='/etc/systemd/resolved.conf',
+                        help='path of the conf file; defaults '
+                        'to /etc/systemd/resolved.conf')
+    parser.add_argument('--no-root',
+                        action='store_true',
+                        help='do not run as root; default is to run as root')
+    args = parser.parse_args()
+    print(args)
+
+    root_window = RootWindow(config_fn=args.config,
+                             run_as_root=not args.no_root)
     root_window.mainloop()
