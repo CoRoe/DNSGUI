@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, simpledialog
 import re
 import argparse
 
@@ -10,6 +10,10 @@ import argparse
 # https://web.archive.org/web/20201112011230/http://effbot.org/tkinterbook/grid.htm
 # https://www.pythontutorial.net/tkinter/tkinter-optionmenu/
 # https://www.tutorialspoint.com/python/tk_entry.htm
+#
+# Password entry: https://stackoverflow.com/questions/15724658/simplest-method-of-asking-user-for-password-using-graphical-dialog-in-python
+#
+# Sudo: https://www.python-forum.de/viewtopic.php?t=1393
 #
 # TODO Allow white space around the '=' signs in the configuration file.
 #
@@ -21,8 +25,17 @@ import argparse
 # TODO Check if one or more variables have been modified after they have been
 # read from the file.
 #
+# TODO Set button focus.
+#
+
 
 class DNSselector(tk.Tk):
+    """
+    Displays a combobox and an entry field side-by-side.
+
+    The combobox allows for selecting a DNS provider (such as Google or Quad9)
+    or manually entering an IPv4 address in dotted notation.
+    """
     def __init__(self, parent, row, text, values, **paddings):
         super(DNSselector, self).__init__()
 
@@ -190,8 +203,10 @@ class RootWindow(tk.Tk):
     def __init__(self, config_fn, run_as_root):
         super(RootWindow, self).__init__()
 
+        self.__run_as_root = run_as_root
         self.__handlers = {}
         self.__config_fn = config_fn
+        self.__password = None
 
         self.__create_widgets()
         self.__read_config(self.__config_fn)
@@ -281,12 +296,32 @@ class RootWindow(tk.Tk):
         print("on_apply")
         if self.__any_value_modified():
             print("... something changed")
-            self.__write_config()
-            for i in self.__handlers:
-                self.__handlers[i].config_written()
+            if self.__run_as_root:
+                # If the password has been previously set don't ask again
+                if not self.__password:
+                    self.__password = simpledialog.askstring("Password needed",
+                                                             "Password:",
+                                                             parent=self,
+                                                             show='*')
+                    print("Password =", self.__password)
+                # If the user has actually entered a password then proceed.
+                if self.__password:
+                    # Write modified values to a temp file and ...
+                    self.__write_config()
+                    # ... copy the temp file to /etc and restart the daemon
+                    for i in self.__handlers:
+                        self.__handlers[i].config_written()
+                    self.b_apply['state'] = tk.DISABLED
+            else:
+                # Run as normal user
+                # Write modified values to a temp file and ...
+                self.__write_config()
+                # ... copy the temp file to /etc and restart the daemon
+                for i in self.__handlers:
+                    self.__handlers[i].config_written()
+                self.b_apply['state'] = tk.DISABLED
         else:
             print("... nothing changed")
-        self.b_apply['state'] = tk.DISABLED
 
 
     #
@@ -322,12 +357,6 @@ class RootWindow(tk.Tk):
                          values=['no', 'yes', 'allow-downgrade'],
                          **RootWindow.paddings)
         self.__handlers['DNSSEC'] = h
-
-        row = row + 1
-        h = EnumSelector(self, row=row, text='Quark',
-                         values=['no', 'yes', 'allow-downgrade'],
-                         **RootWindow.paddings)
-        self.__handlers['Quark'] = h
 
         row = row + 1
         self.b_apply = tk.Button(text="Apply", command=self.__on_apply)
