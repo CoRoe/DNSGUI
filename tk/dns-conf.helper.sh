@@ -3,6 +3,7 @@
 # The script has exactly two arguments:
 #
 # - The tmp file with the new configuration (typically somewhere in /tmp)
+#
 # - The conf file (normally /etc/systemd/resolved.conf
 #
 
@@ -12,23 +13,26 @@ if [ "$#" -ne 2 ]; then
     exit 1
 fi
 
-if ! [ -e "$1" ]; then
-    echo "$1 not found" >&2
+TMP=$1
+CONF=$2
+
+if ! [ -e "${TMP}" ]; then
+    echo "${TMP} not found" >&2
     exit 1
 fi
 
-if ! [ -e "$2" ]; then
-    echo "$2 not found" >&2
+if ! [ -e "${CONF}" ]; then
+    echo "${CONF} not found" >&2
     exit 1
 fi
 
-if ! mv "$2" "$1.bak"; then
-    echo "Cannot rename $2" >&2
+if ! mv -f "${CONF}" "${CONF}.bak"; then
+    echo "Cannot rename ${CONF}" >&2
     exit 1
 fi
 
-if ! cp "$1" "$2"; then
-    echo "Cannot copy $1 to $2" >&2
+if ! cp "${TMP}" "${CONF}"; then
+    echo "Cannot copy ${TMP} to ${CONF}" >&2
     exit 1
 fi
 
