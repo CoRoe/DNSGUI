@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 import tkinter as tk
-from tkinter import ttk, simpledialog
+from tkinter import ttk, simpledialog, messagebox
 import re
 import os
 import subprocess
@@ -21,13 +21,6 @@ import argparse
 #
 # TODO Assign default values to all variables so that they have sensible
 # values even when not present in resolved.conf.
-#
-# TODO Make sure that all variable/value pairs are written to resolved.conf.
-#
-# TODO Check if one or more variables have been modified after they have been
-# read from the file.
-#
-# TODO Set __b_close focus.
 #
 
 
@@ -189,9 +182,9 @@ class RootWindow(tk.Tk):
     #
     # - Widgets erzeugen; zuerst leer, weil die Werte noch nicht bekannt sind
     #
-    # - conf-File lesen und Werte den Widgets zuweisen. Um Änderungen festellen
-    #   zu können, sowohl den initialen Wert (Methode set()) und den momentanen
-    #   Wert (steht im Widget) merken.
+    # - conf-File lesen und Werte den Widgets zuweisen. Um Änderungen
+    #   festellen zu können, sowohl den initialen Wert (Methode set()) und den
+    #   momentanen Wert (steht im Widget) merken.
     #
     # - is_modified() vergleicht den momentanen und den initialen Wert.
 
@@ -205,14 +198,16 @@ class RootWindow(tk.Tk):
     #
     # Class constructor
     #
-    def __init__(self, config_fn, run_as_root):
+    def __init__(self, config_fn, run_as_root, script_path):
         super(RootWindow, self).__init__()
 
         self.__run_as_root = run_as_root
-        self.__handlers = {}
+        self.__script_path = script_path
+        self.__helper_path = self.__script_path.replace(".py", ".helper.sh")
         self.__config_fn = config_fn
         self.__password = None
 
+        self.__handlers = {}
         self.__create_widgets()
         self.__read_config(self.__config_fn)
         #self.write_config()
@@ -247,8 +242,6 @@ class RootWindow(tk.Tk):
     #
     # Save the modified configuration
     #
-    # TODO Handle the case that the original file does not define all keys.
-    #
     def __write_config(self, conf_fn, tmp_fn):
         try:
             with open(conf_fn, 'r') as f_in:
@@ -270,10 +263,9 @@ class RootWindow(tk.Tk):
                     for var in self.__handlers:
                         if not var in updated_vars:
                             print("Missing:", var)
-                            # TODO Must have a default value; otherwise an
-                            # empty value would be written to resolved.conf.
                             f_out.write(
-                                      "{}={}\n".format(var, self.__handlers[var].get()))
+                                      "{}={}\n".format(var,
+                                                       self.__handlers[var].get()))
         except IOErr as e:
             print("Cannot open", e)
 
@@ -313,21 +305,23 @@ class RootWindow(tk.Tk):
                                                              "Password:",
                                                              parent=self,
                                                              show='*')
-                    print("Password =", self.__password)
+                    #print("Password =", self.__password)
                 # If the user has actually entered a password then proceed.
                 if self.__password:
                     # Write modified values to a temp file and ...
-                    self.__write_config()
+                    self.__write_config(self.__config_fn, RootWindow.__tmp_fn)
                     # ... copy the temp file to /etc and restart the daemon
+                    self.__run_helper_script(True)
                     for i in self.__handlers:
                         self.__handlers[i].config_written()
                     self.__b_apply['state'] = tk.DISABLED
+                    self.__b_close.focus_set()
             else:
                 # Run as normal user
                 # Write modified values to a temp file and ...
                 self.__write_config(self.__config_fn, RootWindow.__tmp_fn)
                 # ... copy the temp file to /etc and restart the daemon
-                self.__run_helper_script()
+                self.__run_helper_script(False)
                 for i in self.__handlers:
                     self.__handlers[i].config_written()
                 self.__b_apply['state'] = tk.DISABLED
@@ -396,27 +390,43 @@ class RootWindow(tk.Tk):
         row = row + 1
         self.__b_apply = tk.Button(text="Apply", command=self.__on_apply)
         self.__b_apply['state'] = tk.DISABLED
-        self.__b_apply.grid(row=row, column=2, sticky=tk.E, **RootWindow.__paddings)
+        self.__b_apply.grid(row=row, column=2, sticky=tk.E,
+                            **RootWindow.__paddings)
 
         self.__b_close = tk.Button(text="Close", command=self.__on_close)
-        self.__b_close.grid(row=row, column=3, sticky=tk.W, **RootWindow.__paddings)
+        self.__b_close.grid(row=row, column=3, sticky=tk.W,
+                            **RootWindow.__paddings)
         self.__b_close.focus_set()
-        
+
         self.bind('<Return>', self.__on_return_event)
 
 
-    def __run_helper_script(self):
-        # TODO Handle the sudo case.
+    def __run_helper_script(self, use_sudo):
         # https://docs.python.org/3/library/subprocess.html
-        pwd = os.getcwd()
-        script = pwd + '/dns-conf.helper.sh'
-        print("Helper script:", script)
-        p = subprocess.Popen((script, RootWindow.__tmp_fn, self.__config_fn),
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        output = p.communicate()
+        if use_sudo:
+            p = subprocess.Popen(('sudo', '-S', self.__helper_path,
+                                  RootWindow.__tmp_fn, self.__config_fn),
+                                 stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            output = p.communicate(self.__password.encode())
+        else:
+            p = subprocess.Popen((self.__helper_path,
+                                  RootWindow.__tmp_fn, self.__config_fn),
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            output = p.communicate()
+
+        # Subprocess has terminatred.
         if p.returncode != 0:
             print("Return code: ", p.returncode)
-            print("Subprocess output:", output)
+            print("Subprocess output:", output[0].decode())
+            print("Subprocess output:", output[1].decode())
+            message = output[0].decode()
+            if message != '':
+                message += '\n'
+            message += output[1].decode()
+            messagebox.showerror("Error", message)
             return False
         else:
             return True
@@ -433,8 +443,8 @@ if __name__ == '__main__':
                         action='store_true',
                         help='do not run as root; default is to run as root')
     args = parser.parse_args()
-    print(args)
 
     root_window = RootWindow(config_fn=args.config,
-                             run_as_root=not args.no_root)
+                             run_as_root=not args.no_root,
+                             script_path=os.path.abspath( __file__ ))
     root_window.mainloop()
