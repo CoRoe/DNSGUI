@@ -1,0 +1,7 @@
+{
+    "uuid": "dnssettings@conrad.roeber",
+    "name": "DNS settings",
+    "description": "Check and modify your DNS settings",
+    "icon": "network-server",
+    "max-instances": "-1"
+}

@@ -402,9 +402,10 @@ class RootWindow(tk.Tk):
 
 
     def __run_helper_script(self, use_sudo):
-        # https://docs.python.org/3/library/subprocess.html
+        self.config(cursor="watch")
+        self.update()
         if use_sudo:
-            p = subprocess.Popen(('sudo', '-S', self.__helper_path,
+            p = subprocess.Popen(('sudo', '-S', '-p', '', self.__helper_path,
                                   RootWindow.__tmp_fn, self.__config_fn),
                                  stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE,
@@ -416,16 +417,14 @@ class RootWindow(tk.Tk):
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output = p.communicate()
+        self.config(cursor="")
 
-        # Subprocess has terminatred.
+        # Subprocess has terminated.
         if p.returncode != 0:
             print("Return code: ", p.returncode)
             print("Subprocess output:", output[0].decode())
             print("Subprocess output:", output[1].decode())
-            message = output[0].decode()
-            if message != '':
-                message += '\n'
-            message += output[1].decode()
+            message = output[1].decode() # stderr
             messagebox.showerror("Error", message)
             return False
         else:
