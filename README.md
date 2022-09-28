@@ -11,11 +11,13 @@ It contains three components:
   * A GUI written in Python 3 TK (*/usr/local/bin/dns-conf.py*); it is
     essentially an editor for the configuration file
     */etc/systemd/resolved.conf*.
-  
+	
   * a helper bash script (*/usr/local/bin/dns-conf.helper.psh*);
   
   * an applet for the Cinnamon desktop that starts the GUI component
     (*/usr/share/cinnamon/applets/dnssettings@conrad.roeber*).
+
+![Screenshot](screenshot.png)
 
 Modifying the configuration file and subsequent restart of the resolver
 service require root priviledges. To avoid running the GUI as root, the
@@ -33,7 +35,7 @@ resolver.
 ## Installation
 
 Call *install.sh*; the shell script copies the Java Scipt and JSON files in
-applet/files/${APPLET} to ~/.local/share/cinnamon/applets/${APPLET}, where
+applet/files/${APPLET} to /usr/share/cinnamon/applets/${APPLET}, where
 ${APPLET} is *dnssetting@conrad.roeber*, the applet's UUID.
 
 ## Debugging

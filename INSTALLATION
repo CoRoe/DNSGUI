@@ -1,0 +1,10 @@
+Clone repository
+
+  $ git clone git@github.com:CoRoe/DNSGUI.git
+  $ cd DNSGUI
+
+Call installation script
+
+  $ sudo ./install.sh
+
+In the Cinnamon 'applets' application, enable the 'DNS settings' applet.
