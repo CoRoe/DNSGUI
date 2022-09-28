@@ -64,10 +64,10 @@ class DNSselector(tk.Tk):
 
     def set(self, value):
         self.__ipaddr0 = value
-        print("Set '{}'".format(value))
+        #print("Set '{}'".format(value))
         self.__ipaddr_txt.set(value)
         provider = self.__provider_from_ip(value)
-        print(provider)
+        #print(provider)
         self.__servers_combo.set(provider)
 
     # Given an IP address return the provider name
@@ -100,9 +100,9 @@ class DNSselector(tk.Tk):
     # server name according ly.
     def on_ip_changed(self, event):
         ip = self.__ipaddr_txt.get()
-        print("on_ip_changed:", event, ip)
+        #print("on_ip_changed:", event, ip)
         provider = self.__provider_from_ip(ip)
-        print(provider)
+        #print(provider)
         #self.__servers_var.set(provider)
         self.__servers_combo.set(provider)
         self.__parent.on_value_changed()
@@ -116,8 +116,8 @@ class DNSselector(tk.Tk):
 
     # Checks if a widget's value has been modified and needs to be saved.
     def is_modified(self):
-        print("DNSselector.is_modified: v0={}, v={}".format( self.__ipaddr0,
-                                                             self.__ipaddr_txt.get()))
+        #print("DNSselector.is_modified: v0={}, v={}".format(self.__ipaddr0,
+        #                                                    self.__ipaddr_txt.get()))
         return self.__ipaddr0 != self.__ipaddr_txt.get()
 
 
@@ -158,7 +158,7 @@ class EnumSelector(tk.Tk):
     def set(self, v):
         self.__value_combo.set(v)
         self.__value0 = v
-        print("EnumSelector.set: ", self.__value0, self.__value_combo.get())
+        #print("EnumSelector.set: ", self.__value0, self.__value_combo.get())
 
     # Called after the value has been successfully saved. The instance is
     # flagged as 'not modified'.
@@ -167,12 +167,12 @@ class EnumSelector(tk.Tk):
 
     # Checks i the value has been modified.
     def is_modified(self):
-        print("EnumSelector.is_modified:",
-              self.__value0, self.__value_combo.get())
+        #print("EnumSelector.is_modified:",
+        #      self.__value0, self.__value_combo.get())
         return self.__value0 != self.__value_combo.get()
 
     def __on_value_changed(self, event):
-        print("EnumSelector.on_value_changed:")
+        #print("EnumSelector.on_value_changed:")
         self.__parent.on_value_changed()
 
 
@@ -217,18 +217,16 @@ class RootWindow(tk.Tk):
     # Read the DNS configuration from /etc/systemd/resolved.conf
     #
     def __read_config(self, conf_fn):
-        print("Reading configuration ...")
+        #print("Reading configuration ...")
         try:
             with open(conf_fn, 'r') as ifile:
                 for line in ifile:
-                    print('>', line[:-1])
                     # Extract key and value.
                     try:
                         m = re.match('^([A-Za-z]+)=([a-z0-9.-]+)', line[:-1])
                         if m:
                             key = m.group(1)
                             value = m.group(2)
-                            print('key:', key, ', value:', value)
                             # If a widget is defined for the particular key
                             # then call the set() method of the widget.
                             if key in self.__handlers:
@@ -262,7 +260,7 @@ class RootWindow(tk.Tk):
                     # resolved.conf might not define all
                     for var in self.__handlers:
                         if not var in updated_vars:
-                            print("Missing:", var)
+                            #print("Missing:", var)
                             f_out.write(
                                       "{}={}\n".format(var,
                                                        self.__handlers[var].get()))
@@ -281,7 +279,7 @@ class RootWindow(tk.Tk):
     # Called by widgets when their values change
     def on_value_changed(self):
         m = self.__any_value_modified()
-        print("Value of some widget has changed!", m)
+        #print("Value of some widget has changed!", m)
         if m:
             self.__b_apply['state'] = tk.NORMAL
             self.__b_apply.focus_set()
@@ -295,9 +293,8 @@ class RootWindow(tk.Tk):
         """
         'apply' button pressed.
         """
-        print("on_apply")
         if self.__any_value_modified():
-            print("... something changed")
+            #print("... something changed")
             if self.__run_as_root:
                 # If the password has been previously set don't ask again
                 if not self.__password:
@@ -338,19 +335,16 @@ class RootWindow(tk.Tk):
                                             'Discard changes?',
                                             icon = 'question')
             if answer == True:
-                print("Discarding changes")
+                #print("Discarding changes")
                 self.quit()
         else:
             self.quit()
 
 
     def __on_return_event(self, event):
-        print('on_return')
         if event.widget == self.__b_apply:
-            print("apply")
             self.__on_apply()
         elif event.widget == self.__b_close:
-            print("close")
             self.__on_close()
 
     #
@@ -359,9 +353,6 @@ class RootWindow(tk.Tk):
     #
     def __create_widgets(self):
         self.title("DNS Configuration")
-        #self.minsize(500,400)
-        #p = [q[0] for q in RootWindow.DNSproviders]
-        #print(p)
 
         row = 0
         h = DNSselector(self, row=row, text='DNS server',
@@ -421,9 +412,9 @@ class RootWindow(tk.Tk):
 
         # Subprocess has terminated.
         if p.returncode != 0:
-            print("Return code: ", p.returncode)
-            print("Subprocess output:", output[0].decode())
-            print("Subprocess output:", output[1].decode())
+            #print("Return code: ", p.returncode)
+            #print("Subprocess output:", output[0].decode())
+            #print("Subprocess output:", output[1].decode())
             message = output[1].decode() # stderr
             messagebox.showerror("Error", message)
             return False
