@@ -12,7 +12,7 @@ It contains three components:
     essentially an editor for the configuration file
     */etc/systemd/resolved.conf*.
 	
-  * a helper bash script (*/usr/local/bin/dns-conf.helper.psh*);
+  * a helper bash script (*/usr/local/bin/dns-conf.helper.sh*);
   
   * an applet for the Cinnamon desktop that starts the GUI component
     (*/usr/share/cinnamon/applets/dnssettings@conrad.roeber*).
@@ -20,14 +20,14 @@ It contains three components:
 ![Screenshot](screenshot.png)
 
 Modifying the configuration file and subsequent restart of the resolver
-service require root priviledges. To avoid running the GUI as root, the
-functions that actually require root priviledges are placed into a helper bash
+service require root privileges. To avoid running the GUI as root, the
+functions that actually require root privileges are placed into a helper bash
 script, and only this bash script is called via sudo.
 
 For security reasons, the bash script has to be placed in a directory to which
 the user does not have write access. Otherwise malicious software running in
 the context of the user could modify the script and perform arbitrary actions
-with root priviledges.
+with root privileges.
 
 The applet runs on the Cinnamon desktop and interacts with the systemd DNS
 resolver.

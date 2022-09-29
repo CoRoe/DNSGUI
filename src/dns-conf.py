@@ -32,7 +32,6 @@ class DNSselector(tk.Tk):
     or manually entering an IPv4 address in dotted notation.
     """
     def __init__(self, parent, row, text, values, **paddings):
-        super(DNSselector, self).__init__()
 
         self.__parent = parent
         self.__values = values
@@ -123,7 +122,6 @@ class DNSselector(tk.Tk):
 
 class EnumSelector(tk.Tk):
     def __init__(self, parent, row, text, values, **paddings):
-        super(EnumSelector, self).__init__()
 
         self.__parent = parent
 
@@ -138,7 +136,7 @@ class EnumSelector(tk.Tk):
 
         self.__label = ttk.Label(parent, text=text)
         self.__label.grid(row=row, column=0, sticky='W',
-                          ** paddings)
+                          **paddings)
 
         self.__value_combo = ttk.Combobox(parent)
 
@@ -176,7 +174,12 @@ class EnumSelector(tk.Tk):
         self.__parent.on_value_changed()
 
 
-class RootWindow(tk.Tk):
+
+
+class MainGuiWindow(tk.Tk):
+    """ Main application window.
+    """
+
     #
     # Reihenfolge:
     #
@@ -194,12 +197,14 @@ class RootWindow(tk.Tk):
                     ['Other',      '']]
     __paddings = {'padx': 10, 'pady': 10}
     __tmp_fn = '/tmp/resolved.conf'
+    __resolved_service = 'systemd-resolved'
+
 
     #
     # Class constructor
     #
     def __init__(self, config_fn, run_as_root, script_path):
-        super(RootWindow, self).__init__()
+        super(MainGuiWindow, self).__init__()
 
         self.__run_as_root = run_as_root
         self.__script_path = script_path
@@ -208,9 +213,41 @@ class RootWindow(tk.Tk):
         self.__password = None
 
         self.__handlers = {}
+        self.__check_preconditions()
         self.__create_widgets()
         self.__read_config(self.__config_fn)
-        #self.write_config()
+
+
+    def __check_preconditions(self):
+        """ Checks the preconditoins of the application.
+
+        This check includes a test if
+        - systemd is running
+        - the servce systemd-resolved is installed and running.
+        """
+
+        p = subprocess.Popen(("/usr/bin/systemctl", "status",
+                              MainGuiWindow.__resolved_service),
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        output = p.communicate()
+        print(p.returncode)
+        if p.returncode == 0:
+            pass
+        elif p.returncode == 3:
+            print("Service", MainGuiWindow.__resolved_service, "disabled or stopped")
+            a = messagebox.askyesno("DNS service",
+                                    "The systemd resolver service is not active.\n" +
+                                    "It will be started if you continue. Do you want to proceed?")
+            return a
+        elif p.returncode == 4:
+            print("No service", MainGuiWindow.__resolved_service)
+            return False
+        else:
+            print("Service systemd-resolved status is", p.check_returncode())
+            return False
+
+        return True
 
 
     #
@@ -270,6 +307,7 @@ class RootWindow(tk.Tk):
 
     # Tests whether any value has been modified
     def __any_value_modified(self):
+        """ Tests whether any of the embedded objects has changed."""
         for i in self.__handlers:
             if self.__handlers[i].is_modified():
                return True
@@ -288,11 +326,11 @@ class RootWindow(tk.Tk):
             self.__b_close.focus_set()
 
 
-    # Called by widgets when the 'apply' __b_close is pressed
     def __on_apply(self):
         """
-        'apply' button pressed.
+        Called when the 'apply' button is pressed.
         """
+
         if self.__any_value_modified():
             #print("... something changed")
             if self.__run_as_root:
@@ -306,7 +344,7 @@ class RootWindow(tk.Tk):
                 # If the user has actually entered a password then proceed.
                 if self.__password:
                     # Write modified values to a temp file and ...
-                    self.__write_config(self.__config_fn, RootWindow.__tmp_fn)
+                    self.__write_config(self.__config_fn, MainGuiWindow.__tmp_fn)
                     # ... copy the temp file to /etc and restart the daemon
                     self.__run_helper_script(True)
                     for i in self.__handlers:
@@ -316,7 +354,7 @@ class RootWindow(tk.Tk):
             else:
                 # Run as normal user
                 # Write modified values to a temp file and ...
-                self.__write_config(self.__config_fn, RootWindow.__tmp_fn)
+                self.__write_config(self.__config_fn, MainGuiWindow.__tmp_fn)
                 # ... copy the temp file to /etc and restart the daemon
                 self.__run_helper_script(False)
                 for i in self.__handlers:
@@ -356,55 +394,61 @@ class RootWindow(tk.Tk):
 
         row = 0
         h = DNSselector(self, row=row, text='DNS server',
-                        values=RootWindow.DNSproviders,
-                        **RootWindow.__paddings)
+                        values=MainGuiWindow.DNSproviders,
+                        **MainGuiWindow.__paddings)
         self.__handlers['DNS'] = h
 
         row = row + 1
         h = DNSselector(self, row=row, text='Fallback DNS server',
-                        values=RootWindow.DNSproviders,
-                        **RootWindow.__paddings)
+                        values=MainGuiWindow.DNSproviders,
+                        **MainGuiWindow.__paddings)
         self.__handlers['FallbackDNS'] = h
 
         row = row + 1
         h = EnumSelector(self, row=row, text='DNS over TLS',
                          values=['no', 'yes', 'opportunistic'],
-                         **RootWindow.__paddings)
+                         **MainGuiWindow.__paddings)
         self.__handlers['DNSOverTLS'] = h
 
         row = row + 1
         h = EnumSelector(self, row=row, text='DNSSEC',
                          values=['no', 'yes', 'allow-downgrade'],
-                         **RootWindow.__paddings)
+                         **MainGuiWindow.__paddings)
         self.__handlers['DNSSEC'] = h
 
         row = row + 1
         self.__b_apply = tk.Button(text="Apply", command=self.__on_apply)
         self.__b_apply['state'] = tk.DISABLED
         self.__b_apply.grid(row=row, column=2, sticky=tk.E,
-                            **RootWindow.__paddings)
+                            **MainGuiWindow.__paddings)
 
         self.__b_close = tk.Button(text="Close", command=self.__on_close)
         self.__b_close.grid(row=row, column=3, sticky=tk.W,
-                            **RootWindow.__paddings)
+                            **MainGuiWindow.__paddings)
         self.__b_close.focus_set()
 
         self.bind('<Return>', self.__on_return_event)
 
 
     def __run_helper_script(self, use_sudo):
+        """ Runs the helper script.
+
+        The script copies the updated conf file (in /tmp) to /etc and
+        restarts the systemd-resolved service.
+        """
+
         self.config(cursor="watch")
         self.update()
         if use_sudo:
             p = subprocess.Popen(('sudo', '-S', '-p', '', self.__helper_path,
-                                  RootWindow.__tmp_fn, self.__config_fn),
+                                  MainGuiWindow.__tmp_fn, self.__config_fn),
                                  stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output = p.communicate(self.__password.encode())
         else:
             p = subprocess.Popen((self.__helper_path,
-                                  RootWindow.__tmp_fn, self.__config_fn),
+                                  MainGuiWindow.__tmp_fn, self.__config_fn),
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output = p.communicate()
@@ -434,7 +478,7 @@ if __name__ == '__main__':
                         help='do not run as root; default is to run as root')
     args = parser.parse_args()
 
-    root_window = RootWindow(config_fn=args.config,
-                             run_as_root=not args.no_root,
-                             script_path=os.path.abspath( __file__ ))
+    root_window = MainGuiWindow(config_fn=args.config,
+                                run_as_root=not args.no_root,
+                                script_path=os.path.abspath( __file__ ))
     root_window.mainloop()
