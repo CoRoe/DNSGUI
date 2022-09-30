@@ -237,7 +237,7 @@ class MainGuiWindow(tk.Tk):
         elif p.returncode == 3:
             print("Service", MainGuiWindow.__resolved_service, "disabled or stopped")
             a = messagebox.askyesno("DNS service",
-                                    "The systemd resolver service is not active.\n" +
+                                    "The systemd resolver service is not active.\n\n" +
                                     "It will be started if you continue. Do you want to proceed?")
             return a
         elif p.returncode == 4:
@@ -346,7 +346,9 @@ class MainGuiWindow(tk.Tk):
                     # Write modified values to a temp file and ...
                     self.__write_config(self.__config_fn, MainGuiWindow.__tmp_fn)
                     # ... copy the temp file to /etc and restart the daemon
-                    self.__run_helper_script(True)
+                    if not self.__update_conf_file():
+                        return
+                    #self.__run_helper_script(True)
                     for i in self.__handlers:
                         self.__handlers[i].config_written()
                     self.__b_apply['state'] = tk.DISABLED
@@ -430,40 +432,60 @@ class MainGuiWindow(tk.Tk):
         self.bind('<Return>', self.__on_return_event)
 
 
-    def __run_helper_script(self, use_sudo):
-        """ Runs the helper script.
+    def __update_conf_file(self):
+        """ Updates the conf file in /etc.
 
-        The script copies the updated conf file (in /tmp) to /etc and
-        restarts the systemd-resolved service.
+        Steps are:
+        - Copy conf file to backup file
+        - Copy temp file to conf file
+        - Restart resolver service
         """
 
-        self.config(cursor="watch")
-        self.update()
-        if use_sudo:
-            p = subprocess.Popen(('sudo', '-S', '-p', '', self.__helper_path,
-                                  MainGuiWindow.__tmp_fn, self.__config_fn),
+        try:
+            # Copy conf file to backup file
+            p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '', 'cp',
+                                  self.__config_fn, self.__config_fn + '.bak'),
                                  stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output = p.communicate(self.__password.encode())
-        else:
-            p = subprocess.Popen((self.__helper_path,
-                                  MainGuiWindow.__tmp_fn, self.__config_fn),
+            #print("__update_conf_file return code:", p.returncode,
+            #      output[0], output[1])
+            if p.returncode != 0:
+                messagebox.showerror("Error", output[1])
+                return False
+
+            # Copy temp file to conf file
+            p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '', 'cp',
+                                  self.__tmp_fn, self.__config_fn),
+                                 stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
-            output = p.communicate()
-        self.config(cursor="")
+            output = p.communicate(self.__password.encode())
+            #print("__update_conf_file return code:", p.returncode,
+            #      output[0], output[1])
+            if p.returncode != 0:
+                messagebox.showerror("Error", output[1])
+                return False
 
-        # Subprocess has terminated.
-        if p.returncode != 0:
-            #print("Return code: ", p.returncode)
-            #print("Subprocess output:", output[0].decode())
-            #print("Subprocess output:", output[1].decode())
-            message = output[1].decode() # stderr
-            messagebox.showerror("Error", message)
-            return False
-        else:
+            # Restart the resolver service
+            p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
+                                  'systemctl', 'restart',
+                                  'systemd-resolved.service'),
+                                 stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            output = p.communicate(self.__password.encode())
+            #print("__update_conf_file return code:", p.returncode,
+            #      output[0], output[1])
+            if p.returncode != 0:
+                messagebox.showerror("Error", output[1])
+                return False
+
             return True
+
+        except Exception as e:
+            print("__update_conf_file exception", e)
 
 
 if __name__ == '__main__':

@@ -6,23 +6,16 @@ This project is a simple GUI interface to the parameters of the DNS resolver
 that is part of systemd. It is handy for instance when having to go through a
 captive portal that the secure DNS queries.
 
-It contains three components:
+It contains two components:
 
   * A GUI written in Python 3 TK (*/usr/local/bin/dns-conf.py*); it is
     essentially an editor for the configuration file
     */etc/systemd/resolved.conf*.
-	
-  * a helper bash script (*/usr/local/bin/dns-conf.helper.sh*);
-  
+
   * an applet for the Cinnamon desktop that starts the GUI component
     (*/usr/share/cinnamon/applets/dnssettings@conrad.roeber*).
 
 ![Screenshot](screenshot.png)
-
-Modifying the configuration file and subsequent restart of the resolver
-service require root privileges. To avoid running the GUI as root, the
-functions that actually require root privileges are placed into a helper bash
-script, and only this bash script is called via sudo.
 
 For security reasons, the bash script has to be placed in a directory to which
 the user does not have write access. Otherwise malicious software running in
