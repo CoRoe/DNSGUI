@@ -1,11 +1,14 @@
 #!/usr/bin/python3
 
-import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox
+from PyQt5.QtGui import *
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+
 import re
 import os
 import subprocess
 import argparse
+import sys                      # TODO Remove, use argparse
 
 
 #
@@ -24,14 +27,28 @@ import argparse
 #
 
 
-class DNSselector(tk.Tk):
+class SystemCtl():
+    @classmethod
+    def status(cls, service):
+        print("Querying status of", service)
+        p = subprocess.Popen(('/usr/bin/systemctl', 'status',
+                                  service),
+                                 stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+        output = p.communicate()
+        print("Return code", p.returncode)
+        return p.returncode
+
+
+class DNSselector():
     """
     Displays a combobox and an entry field side-by-side.
 
     The combobox allows for selecting a DNS provider (such as Google or Quad9)
     or manually entering an IPv4 address in dotted notation.
     """
-    def __init__(self, parent, row, text, values, **paddings):
+    def __init__(self, parent, layout, row, text, values, **paddings):
 
         self.__parent = parent
         self.__values = values
@@ -39,22 +56,27 @@ class DNSselector(tk.Tk):
 
         # Creates a label with the explanatory text, an option menu (to select
         # the DNS provider), and an entry field (chosen IP address)
-        label = ttk.Label(parent, text=text)
-        label.grid(row=row, column=0, sticky='W', **paddings)
+        label = QLabel(text)
+        layout.addWidget(label, row, 1)
+        #label.grid(row=row, column=0, sticky='W', **paddings)
 
-        self.__servers_combo = ttk.Combobox(parent)
-        self.__servers_combo['values'] = [q[0] for q in values]
-        self.__servers_combo['state'] = 'readonly'
-        self.__servers_combo.bind('<<ComboboxSelected>>', self.on_server_changed)
-        self.__servers_combo.grid(row=row, column=1, sticky='W',
-                            **paddings)
+        self.__servers_combo = QComboBox(parent)
+        self.__servers_combo.addItems([q[0] for q in values])
+        self.__servers_combo.currentTextChanged.connect(self.on_server_changed)
+        #self.__servers_combo['state'] = 'readonly'
+        #self.__servers_combo.bind('<<ComboboxSelected>>', self.on_server_changed)
+        self.__servers_combo.activated.connect(self.on_server_changed)
+        layout.addWidget(self.__servers_combo, row, 2)
+        #self.__servers_combo.grid(row=row, column=1, sticky='W',
+        #                    **paddings)
 
-        self.__ipaddr_txt = tk.StringVar()
-        self.__ipaddr_entry = tk.Entry(parent, textvariable=self.__ipaddr_txt)
-        self.__ipaddr_entry.grid(row=row, column=2)
+        #self.__ipaddr_txt = tk.StringVar()
+        self.__ipaddr_entry = QLineEdit(parent)
+        #self.__ipaddr_entry.grid(row=row, column=2)
+        layout.addWidget(self.__ipaddr_entry, row, 3)
 
-        self.__ipaddr_entry.bind('<Key-Return> ', self.on_ip_changed)
-        self.__ipaddr_entry.bind('<FocusOut> ', self.on_ip_changed)
+        #self.__ipaddr_entry.bind('<Key-Return> ', self.on_ip_changed)
+        #self.__ipaddr_entry.bind('<FocusOut> ', self.on_ip_changed)
 
 
     def get(self):
@@ -64,10 +86,10 @@ class DNSselector(tk.Tk):
     def set(self, value):
         self.__ipaddr0 = value
         #print("Set '{}'".format(value))
-        self.__ipaddr_txt.set(value)
+        #self.__ipaddr_txt.set(value)
         provider = self.__provider_from_ip(value)
         #print(provider)
-        self.__servers_combo.set(provider)
+        self.__servers_combo.setCurrentText(provider)
 
     # Given an IP address return the provider name
     def __provider_from_ip(self, ip):
@@ -87,11 +109,11 @@ class DNSselector(tk.Tk):
     # address accordingly.
     def on_server_changed(self, event):
         #print('On server changed', event)
-        server = self.__servers_combo.get()
+        server = self.__servers_combo.currentText()
         #print("New value:", server)
         i = [q[0] for q in self.__values].index(server)
         ipaddr = self.__ip_from_provider(server)
-        self.__ipaddr_txt.set(ipaddr)
+        self.__ipaddr_entry.setText(ipaddr)
         self.__parent.on_value_changed()
 
 
@@ -117,11 +139,11 @@ class DNSselector(tk.Tk):
     def is_modified(self):
         #print("DNSselector.is_modified: v0={}, v={}".format(self.__ipaddr0,
         #                                                    self.__ipaddr_txt.get()))
-        return self.__ipaddr0 != self.__ipaddr_txt.get()
+        return self.__ipaddr0 != self.__ipaddr_entry.text()
 
 
-class EnumSelector(tk.Tk):
-    def __init__(self, parent, row, text, values, **paddings):
+class EnumSelector():
+    def __init__(self, parent, layout, row, text, values, **paddings):
 
         self.__parent = parent
 
@@ -134,27 +156,31 @@ class EnumSelector(tk.Tk):
         # - Updated to the current value when the configuration file is saved.
         self.__value0 = values[0]
 
-        self.__label = ttk.Label(parent, text=text)
-        self.__label.grid(row=row, column=0, sticky='W',
-                          **paddings)
+        self.__label = QLabel(text)
+        layout.addWidget(self.__label, row, 1)
+        #self.__label.grid(row=row, column=0, sticky='W',
+        #                  **paddings)
 
-        self.__value_combo = ttk.Combobox(parent)
+        self.__value_combo = QComboBox(parent)
 
         # Initialise with the 1st value of the list of valid values:
-        self.__value_combo.set(values[0])
-        self.__value_combo.grid(row=row, column=1, sticky='W',
-                                **paddings)
-        self.__value_combo['values'] = values
-        self.__value_combo['state'] = 'readonly'
+        #self.__value_combo.set(values[0])
+        layout.addWidget(self.__value_combo, row, 2)
+        #self.__value_combo.grid(row=row, column=1, sticky='W',
+        #                        **paddings)
+        #self.__value_combo['values'] = values
+        self.__value_combo.addItems(values)
+        #self.__value_combo['state'] = 'readonly'
 
-        self.__value_combo.bind('<<ComboboxSelected>> ',
-                                self.__on_value_changed)
+        #self.__value_combo.bind('<<ComboboxSelected>> ',
+        #                        self.__on_value_changed)
+        self.__value_combo.currentIndexChanged.connect(self.__on_value_changed)
 
     def get(self):
         return self.__value_combo.get()
 
     def set(self, v):
-        self.__value_combo.set(v)
+        self.__value_combo.setCurrentText(v)
         self.__value0 = v
         #print("EnumSelector.set: ", self.__value0, self.__value_combo.get())
 
@@ -167,16 +193,16 @@ class EnumSelector(tk.Tk):
     def is_modified(self):
         #print("EnumSelector.is_modified:",
         #      self.__value0, self.__value_combo.get())
-        return self.__value0 != self.__value_combo.get()
+        return self.__value0 != self.__value_combo.currentText()
 
-    def __on_value_changed(self, event):
+    def __on_value_changed(self, index):
         #print("EnumSelector.on_value_changed:")
         self.__parent.on_value_changed()
 
 
 
 
-class MainGuiWindow(tk.Tk):
+class MainGuiWindow(QMainWindow):
     """ Main application window.
     """
 
@@ -226,28 +252,6 @@ class MainGuiWindow(tk.Tk):
         - systemd is running
         - the servce systemd-resolved is installed and running.
         """
-
-        p = subprocess.Popen(("/usr/bin/systemctl", "status",
-                              MainGuiWindow.__resolved_service),
-                             stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-        output = p.communicate()
-        print(p.returncode)
-        if p.returncode == 0:
-            pass
-        elif p.returncode == 3:
-            print("Service", MainGuiWindow.__resolved_service, "disabled or stopped")
-            a = messagebox.askyesno("DNS service",
-                                    "The systemd resolver service is not active.\n\n" +
-                                    "It will be started if you continue. Do you want to proceed?")
-            return a
-        elif p.returncode == 4:
-            print("No service", MainGuiWindow.__resolved_service)
-            return False
-        else:
-            print("Service systemd-resolved status is", p.check_returncode())
-            return False
-
         return True
 
 
@@ -271,7 +275,7 @@ class MainGuiWindow(tk.Tk):
                                 self.__handlers[key].set(value)
                     except re.error as e:
                         print("RE problem", e)
-        except IOErr as e:
+        except IOError as e:
             print("Cannot open", conf_fn, e)
 
 
@@ -320,11 +324,15 @@ class MainGuiWindow(tk.Tk):
         m = self.__any_value_modified()
         #print("Value of some widget has changed!", m)
         if m:
-            self.__b_apply['state'] = tk.NORMAL
-            self.__b_apply.focus_set()
+            # Modified, enable 'apply' button and set focus to it.
+            #self.__b_apply['state'] = tk.NORMAL
+            self.__b_apply.setEnabled(True)
+            self.__b_apply.setFocus()
         else:
-            self.__b_apply['state'] = tk.DISABLED
-            self.__b_close.focus_set()
+            # Nothing modified; disable 'apply' button and set focus to 'close'.
+            #self.__b_apply['state'] = tk.DISABLED
+            self.__b_apply.setEnabled(False)
+            self.__b_close.setFocus()
 
 
     def __on_apply(self):
@@ -353,7 +361,7 @@ class MainGuiWindow(tk.Tk):
                     for i in self.__handlers:
                         self.__handlers[i].config_written()
                     self.__b_apply['state'] = tk.DISABLED
-                    self.__b_close.focus_set()
+                    self.__b_close.setFocus()
             else:
                 # Run as normal user
                 # Write modified values to a temp file and ...
@@ -372,14 +380,14 @@ class MainGuiWindow(tk.Tk):
         Close button pressed
         """
         if self.__any_value_modified():
-            answer = tk.messagebox.askyesno('Exit Application',
+            answer = tk.QMessageBox.askyesno('Exit Application',
                                             'Discard changes?',
                                             icon = 'question')
             if answer == True:
                 #print("Discarding changes")
-                self.quit()
+                QCoreApplication.quit()
         else:
-            self.quit()
+            QCoreApplication.quit()
 
 
     def __on_return_event(self, event):
@@ -388,49 +396,93 @@ class MainGuiWindow(tk.Tk):
         elif event.widget == self.__b_close:
             self.__on_close()
 
+
+    def __on_systemd_resolver_changed(self, x):
+        s = self.__systemd_resolver.checkState()
+        if s:
+            self.__portmaster.setChecked(False)
+        
+
+    def __on_portmaster_changed(self, x):
+        s = self.__portmaster.checkState()
+        if s:
+            self.__systemd_resolver.setChecked(False)
+        
+
     #
     # Create the widgets and initialise them with the values read from the
     # conf file.
     #
     def __create_widgets(self):
-        self.title("DNS Configuration")
+        self.setWindowTitle("DNS Configuration")
+
+        main_layout = QVBoxLayout()
+        config_area = QGridLayout()
+        button_area = QHBoxLayout()
+        widget = QWidget()
+        #widget.setLayout(main_layout)
+
+        self.__systemd_resolver = QCheckBox("Systemd Resolver", widget)
+        s = SystemCtl.status("systemd-resolved.service")
+        if s == 0:
+            self.__systemd_resolver.setChecked(True)
+        self.__systemd_resolver.stateChanged.connect(self.__on_systemd_resolver_changed)
+            
+        main_layout.addWidget(self.__systemd_resolver)
 
         row = 0
-        h = DNSselector(self, row=row, text='DNS server',
+        h = DNSselector(self, config_area, row=row, text='DNS server',
                         values=MainGuiWindow.DNSproviders,
                         **MainGuiWindow.__paddings)
         self.__handlers['DNS'] = h
 
         row = row + 1
-        h = DNSselector(self, row=row, text='Fallback DNS server',
+        h = DNSselector(self, config_area, row=row, text='Fallback DNS server',
                         values=MainGuiWindow.DNSproviders,
                         **MainGuiWindow.__paddings)
         self.__handlers['FallbackDNS'] = h
 
         row = row + 1
-        h = EnumSelector(self, row=row, text='DNS over TLS',
+        h = EnumSelector(self, config_area, row=row, text='DNS over TLS',
                          values=['no', 'yes', 'opportunistic'],
                          **MainGuiWindow.__paddings)
         self.__handlers['DNSOverTLS'] = h
 
         row = row + 1
-        h = EnumSelector(self, row=row, text='DNSSEC',
+        h = EnumSelector(self, config_area, row=row, text='DNSSEC',
                          values=['no', 'yes', 'allow-downgrade'],
                          **MainGuiWindow.__paddings)
         self.__handlers['DNSSEC'] = h
 
         row = row + 1
-        self.__b_apply = tk.Button(text="Apply", command=self.__on_apply)
-        self.__b_apply['state'] = tk.DISABLED
-        self.__b_apply.grid(row=row, column=2, sticky=tk.E,
-                            **MainGuiWindow.__paddings)
+        self.__b_apply = QPushButton(text="Apply")
+        self.__b_apply.clicked.connect(self.__on_apply)
+        #self.__b_apply['state'] = tk.DISABLED
+        #self.__b_apply.grid(row=row, column=2, sticky=tk.E,
+        #                    **MainGuiWindow.__paddings)
+        button_area.addWidget(self.__b_apply)
 
-        self.__b_close = tk.Button(text="Close", command=self.__on_close)
-        self.__b_close.grid(row=row, column=3, sticky=tk.W,
-                            **MainGuiWindow.__paddings)
-        self.__b_close.focus_set()
+        self.__b_close = QPushButton(text="Close")
+        self.__b_close.clicked.connect(self.__on_close)
+        #self.__b_close.grid(row=row, column=3, sticky=tk.W,
+        #                    **MainGuiWindow.__paddings)
+        button_area.addWidget(self.__b_close)
+        #self.__b_close.setFocus()
 
-        self.bind('<Return>', self.__on_return_event)
+        #self.bind('<Return>', self.__on_return_event)
+        main_layout.addLayout(config_area)
+
+        self.__portmaster = QCheckBox("Portmaster", widget)
+        s = SystemCtl.status("portmaster.service")
+        if s == 0:
+            self.__portmaster.setChecked(True)
+        self.__portmaster.stateChanged.connect(self.__on_portmaster_changed)
+
+        main_layout.addWidget(self.__portmaster)
+
+        main_layout.addLayout(button_area)
+        widget.setLayout(main_layout)
+        self.setCentralWidget(widget)
 
 
     def __update_conf_file(self):
@@ -453,7 +505,7 @@ class MainGuiWindow(tk.Tk):
             #print("__update_conf_file return code:", p.returncode,
             #      output[0], output[1])
             if p.returncode != 0:
-                messagebox.showerror("Error", output[1])
+                QMessageBox.showerror("Error", output[1])
                 return False
 
             # Copy temp file to conf file
@@ -466,7 +518,7 @@ class MainGuiWindow(tk.Tk):
             #print("__update_conf_file return code:", p.returncode,
             #      output[0], output[1])
             if p.returncode != 0:
-                messagebox.showerror("Error", output[1])
+                QMessageBox.showerror("Error", output[1])
                 return False
 
             # Restart the resolver service
@@ -480,7 +532,7 @@ class MainGuiWindow(tk.Tk):
             #print("__update_conf_file return code:", p.returncode,
             #      output[0], output[1])
             if p.returncode != 0:
-                messagebox.showerror("Error", output[1])
+                QMessageBox.showerror("Error", output[1])
                 return False
 
             return True
@@ -501,7 +553,9 @@ if __name__ == '__main__':
                         help='do not run as root; default is to run as root')
     args = parser.parse_args()
 
+    app = QApplication(sys.argv)
     root_window = MainGuiWindow(config_fn=args.config,
                                 run_as_root=not args.no_root,
                                 script_path=os.path.abspath( __file__ ))
-    root_window.mainloop()
+    root_window.show()
+    app.exec_()
