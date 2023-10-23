@@ -192,6 +192,7 @@ class MainGuiWindow(tk.Tk):
     # - is_modified() vergleicht den momentanen und den initialen Wert.
 
     DNSproviders = [['Quad9',      '9.9.9.9'],
+                    ['DNSforge',   '176.9.93.198'],
                     ['Google',     '8.8.8.8'],
                     ['Cloudflare', '1.1.1.1'],
                     ['Other',      '']]
