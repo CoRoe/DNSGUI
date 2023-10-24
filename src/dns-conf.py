@@ -41,6 +41,64 @@ class SystemCtl():
         return p.returncode
 
 
+class DnsResolverModel():
+
+    def __init__(self, conf_fn):
+
+        if SystemCtl.status("systemd-resolved.service") == 0:
+            self.resolver0 = 'systemd-resolved'
+        elif SystemCtl.status("portmaster.service") == 0:
+            self.__resolver0 = 'portmaster'
+        else:
+            self.__resolver0 = None
+
+        self.__params0 = {}
+
+        try:
+            with open(conf_fn, 'r') as ifile:
+                for line in ifile:
+                    # Extract key and value.
+                    try:
+                        m = re.match('^([A-Za-z]+)=([a-z0-9.-]+)', line[:-1])
+                        if m:
+                            key = m.group(1)
+                            value = m.group(2)
+                            self.__params0[key] = value
+                    except re.error as e:
+                        print("RE problem", e)
+        except IOError as e:
+            print("Cannot open", conf_fn, e)
+
+        self.__resolver = self.__resolver0
+        self.__params = self.__params0.copy()
+
+
+    def save(self, conf_fn, run_ass_root, password=None):
+        print("DnsResolverModel.save")
+        # Values saved, set status to 'not modified'
+        self.__resolver = self.__resolver0
+        self.__params = self.__params0.copy()
+
+
+    def is_modified(self):
+        print("DnsResolverModel.is_modified")
+        return not (self.__resolver == self.__resolver0 and self.__params == self.__params0)
+
+
+    def resolver(self):
+        return self.__resolver
+
+
+    def value(self, key):
+        if key in self.__params:
+            return self.__params[key]
+        else:
+            return None
+
+    def setValue(self, key, value):
+        self.__params[key] = value
+
+
 class DNSselector():
     """
     Displays a combobox and an entry field side-by-side.
@@ -48,9 +106,10 @@ class DNSselector():
     The combobox allows for selecting a DNS provider (such as Google or Quad9)
     or manually entering an IPv4 address in dotted notation.
     """
-    def __init__(self, parent, layout, row, text, values, **paddings):
+    def __init__(self, parent, model, layout, row, text, values):
 
         self.__parent = parent
+        self.__model = model
         self.__values = values
         self.__ipaddr0 = values[0][1]
 
@@ -143,9 +202,12 @@ class DNSselector():
 
 
 class EnumSelector():
-    def __init__(self, parent, layout, row, text, values, **paddings):
+    def __init__(self, parent, model, layout, row, text, values, key, **paddings):
 
         self.__parent = parent
+        self.__model = model
+        self.__key = key
+        self.__values = values
 
         # The initial value. Its purpose is to track if the actual value of
         # the setting is has been modified and needs to be saved.
@@ -196,7 +258,8 @@ class EnumSelector():
         return self.__value0 != self.__value_combo.currentText()
 
     def __on_value_changed(self, index):
-        #print("EnumSelector.on_value_changed:")
+        print("EnumSelector.on_value_changed:", self.__key, self.__values[index], index)
+        self.__model.setValue(self.__key, self.__values[index])
         self.__parent.on_value_changed()
 
 
@@ -230,29 +293,20 @@ class MainGuiWindow(QMainWindow):
     #
     # Class constructor
     #
-    def __init__(self, config_fn, run_as_root, script_path):
+    def __init__(self, model, config_fn, run_as_root, script_path):
         super(MainGuiWindow, self).__init__()
 
         self.__run_as_root = run_as_root
         self.__script_path = script_path
         self.__helper_path = self.__script_path.replace(".py", ".helper.sh")
         self.__config_fn = config_fn
+        self.__model = model
         self.__password = None
 
         self.__handlers = {}
-        self.__check_preconditions()
-        self.__create_widgets()
+        #self.__check_preconditions()
+        self.__create_widgets(model)
         self.__read_config(self.__config_fn)
-
-
-    def __check_preconditions(self):
-        """ Checks the preconditoins of the application.
-
-        This check includes a test if
-        - systemd is running
-        - the servce systemd-resolved is installed and running.
-        """
-        return True
 
 
     #
@@ -321,7 +375,7 @@ class MainGuiWindow(QMainWindow):
 
     # Called by widgets when their values change
     def on_value_changed(self):
-        m = self.__any_value_modified()
+        m = self.__model.is_modified()
         #print("Value of some widget has changed!", m)
         if m:
             # Modified, enable 'apply' button and set focus to it.
@@ -340,8 +394,8 @@ class MainGuiWindow(QMainWindow):
         Called when the 'apply' button is pressed.
         """
 
-        if self.__any_value_modified():
-            #print("... something changed")
+        if self.__model.is_modified():
+            print("... something changed")
             if self.__run_as_root:
                 # If the password has been previously set don't ask again
                 if not self.__password:
@@ -365,12 +419,9 @@ class MainGuiWindow(QMainWindow):
             else:
                 # Run as normal user
                 # Write modified values to a temp file and ...
-                self.__write_config(self.__config_fn, MainGuiWindow.__tmp_fn)
-                # ... copy the temp file to /etc and restart the daemon
-                self.__run_helper_script(False)
-                for i in self.__handlers:
-                    self.__handlers[i].config_written()
-                self.__b_apply['state'] = tk.DISABLED
+                #self.__write_config(self.__config_fn, MainGuiWindow.__tmp_fn)
+                self.__model.save(self.__config_fn, self.__run_as_root)
+                self.on_value_changed()
         else:
             print("... nothing changed")
 
@@ -379,11 +430,13 @@ class MainGuiWindow(QMainWindow):
         """
         Close button pressed
         """
-        if self.__any_value_modified():
-            answer = tk.QMessageBox.askyesno('Exit Application',
-                                            'Discard changes?',
-                                            icon = 'question')
-            if answer == True:
+        #if self.__any_value_modified():
+        if self.__model.is_modified():
+            answer = QMessageBox.question(self,
+                                          'Exit Application',
+                                           'Discard changes?',
+                                           QMessageBox.Yes | QMessageBox.No)
+            if answer == QMessageBox.Yes:
                 #print("Discarding changes")
                 QCoreApplication.quit()
         else:
@@ -401,19 +454,21 @@ class MainGuiWindow(QMainWindow):
         s = self.__systemd_resolver.checkState()
         if s:
             self.__portmaster.setChecked(False)
-        
+
 
     def __on_portmaster_changed(self, x):
         s = self.__portmaster.checkState()
         if s:
             self.__systemd_resolver.setChecked(False)
-        
+
 
     #
     # Create the widgets and initialise them with the values read from the
     # conf file.
     #
-    def __create_widgets(self):
+    def __create_widgets(self, model):
+        assert(type(model) == DnsResolverModel)
+
         self.setWindowTitle("DNS Configuration")
 
         main_layout = QVBoxLayout()
@@ -423,35 +478,32 @@ class MainGuiWindow(QMainWindow):
         #widget.setLayout(main_layout)
 
         self.__systemd_resolver = QCheckBox("Systemd Resolver", widget)
-        s = SystemCtl.status("systemd-resolved.service")
-        if s == 0:
+        #s = SystemCtl.status("systemd-resolved.service")
+        if model.resolver() == 'systemd-resolved':
             self.__systemd_resolver.setChecked(True)
         self.__systemd_resolver.stateChanged.connect(self.__on_systemd_resolver_changed)
-            
         main_layout.addWidget(self.__systemd_resolver)
 
         row = 0
-        h = DNSselector(self, config_area, row=row, text='DNS server',
-                        values=MainGuiWindow.DNSproviders,
-                        **MainGuiWindow.__paddings)
+        # parent, model, layout, row, text, values
+        h = DNSselector(self, model, config_area, row=row, text='DNS server',
+                        values=MainGuiWindow.DNSproviders)
         self.__handlers['DNS'] = h
 
         row = row + 1
-        h = DNSselector(self, config_area, row=row, text='Fallback DNS server',
-                        values=MainGuiWindow.DNSproviders,
-                        **MainGuiWindow.__paddings)
+        h = DNSselector(self, model, config_area, row=row, text='Fallback DNS server',
+                        values=MainGuiWindow.DNSproviders)
         self.__handlers['FallbackDNS'] = h
 
         row = row + 1
-        h = EnumSelector(self, config_area, row=row, text='DNS over TLS',
-                         values=['no', 'yes', 'opportunistic'],
-                         **MainGuiWindow.__paddings)
+        # parent, layout, row, text, values, key, **paddings
+        h = EnumSelector(self, model, config_area, row, 'DNS over TLS',
+                         ['no', 'yes', 'opportunistic'], 'DNSOverTLS')
         self.__handlers['DNSOverTLS'] = h
 
         row = row + 1
-        h = EnumSelector(self, config_area, row=row, text='DNSSEC',
-                         values=['no', 'yes', 'allow-downgrade'],
-                         **MainGuiWindow.__paddings)
+        h = EnumSelector(self, model, config_area, row, 'DNSSEC',
+                         ['no', 'yes', 'allow-downgrade'], 'DNSSEC',)
         self.__handlers['DNSSEC'] = h
 
         row = row + 1
@@ -473,8 +525,7 @@ class MainGuiWindow(QMainWindow):
         main_layout.addLayout(config_area)
 
         self.__portmaster = QCheckBox("Portmaster", widget)
-        s = SystemCtl.status("portmaster.service")
-        if s == 0:
+        if model.resolver() == 'portmaster':
             self.__portmaster.setChecked(True)
         self.__portmaster.stateChanged.connect(self.__on_portmaster_changed)
 
@@ -491,7 +542,7 @@ class MainGuiWindow(QMainWindow):
         Steps are:
         - Copy conf file to backup file
         - Copy temp file to conf file
-        - Restart resolver service
+        - Restart resolver0 service
         """
 
         try:
@@ -521,7 +572,7 @@ class MainGuiWindow(QMainWindow):
                 QMessageBox.showerror("Error", output[1])
                 return False
 
-            # Restart the resolver service
+            # Restart the resolver0 service
             p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
                                   'systemctl', 'restart',
                                   'systemd-resolved.service'),
@@ -543,7 +594,7 @@ class MainGuiWindow(QMainWindow):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Display and modify settings '
-                                     'of the systemd DNS resolver.')
+                                     'of the systemd DNS resolver0.')
     parser.add_argument('--config',
                         default='/etc/systemd/resolved.conf',
                         help='path of the conf file; defaults '
@@ -553,8 +604,9 @@ if __name__ == '__main__':
                         help='do not run as root; default is to run as root')
     args = parser.parse_args()
 
+    model = DnsResolverModel(args.config)
     app = QApplication(sys.argv)
-    root_window = MainGuiWindow(config_fn=args.config,
+    root_window = MainGuiWindow(model, config_fn=args.config,
                                 run_as_root=not args.no_root,
                                 script_path=os.path.abspath( __file__ ))
     root_window.show()
