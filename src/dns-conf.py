@@ -1,5 +1,8 @@
 #!/usr/bin/python3
 
+""" Simple graphical tool to configure DNS resolvers on Ubuntu and similar platforms.
+"""
+
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
@@ -10,6 +13,11 @@ import subprocess
 import argparse
 import sys                      # TODO Remove, use argparse
 
+#
+# TODO Don't reqrite the configuration file if only the local resolver has changed.
+#
+# TODO RETURN key
+#
 
 #
 # https://web.archive.org/web/20201112011230/http://effbot.org/tkinterbook/grid.htm
@@ -28,27 +36,60 @@ import sys                      # TODO Remove, use argparse
 
 
 class SystemCtl():
+    """ Deals with systemd services.
+    """
+    SVC_PORTMASTER = 'portmaster.service'
+    SVC_SYSTEMD_RESOLVED = 'systemd-resolved.service'
+
     @classmethod
     def status(cls, service):
+        """ Queries the status of a service.
+        """
         print("Querying status of", service)
-        p = subprocess.Popen(('/usr/bin/systemctl', 'status',
-                                  service),
-                                 stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
+        p = subprocess.Popen(('/usr/bin/systemctl', 'status', service),
+                             stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
         output = p.communicate()
         print("Return code", p.returncode)
         return p.returncode
 
+    @classmethod
+    def startOrStop(cls, command, service, password=None):
+        """ Starts or stops a systemctl service. If a password is specified
+            then sudo is used and the password is piped into sudo.
+        """
+        assert(command in ('start', 'stop'))
+        print("startOrStop", command, service)
+        if password:
+            p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
+                                  'systemctl', command, service),
+                                 stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            output = p.communicate(password.encode())
+        else:
+            p = subprocess.Popen(('systemctl', command, service),
+                                 stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            output = p.communicate()
+        if p.returncode != 0:
+            QMessageBox.showerror("Error", output[1])
+            return False
+
+        return True
+
 
 class DnsResolverModel():
-
+    """ Models the data that is visualized by the MainGuiWindow.
+    """
     def __init__(self, conf_fn):
 
-        if SystemCtl.status("systemd-resolved.service") == 0:
-            self.resolver0 = 'systemd-resolved'
-        elif SystemCtl.status("portmaster.service") == 0:
-            self.__resolver0 = 'portmaster'
+        if SystemCtl.status(SystemCtl.SVC_SYSTEMD_RESOLVED) == 0:
+            self.__resolver0 = SystemCtl.SVC_SYSTEMD_RESOLVED
+        elif SystemCtl.status(SystemCtl.SVC_PORTMASTER) == 0:
+            self.__resolver0 = SystemCtl.SVC_PORTMASTER
         else:
             self.__resolver0 = None
 
@@ -73,8 +114,68 @@ class DnsResolverModel():
         self.__params = self.__params0.copy()
 
 
-    def save(self, conf_fn, run_ass_root, password=None):
+    def save(self, conf_fn, run_as_root, password=None):
+        """ Save the changed data to the configuration file.
+
+        Copies the content of the configuration file to a temporary file,
+        replacing the changed values. After that, the temporary file
+        is copied to the configuration file; this requires root privileges.
+        """
+        tmp_fn = '/tmp/resolv.conf'
+
+        if run_as_root: assert(password)
+
         print("DnsResolverModel.save")
+        try:
+            with open(conf_fn, 'r') as f_in:
+                with open(tmp_fn, 'w') as f_out:
+                    updated_vars = set()
+                    for line in f_in:
+                        m = re.match('^([A-Za-z]+)=', line)
+                        if m:
+                            var = m.group(1)
+                            if var in self.__params:
+                                f_out.write(
+                                      "{}={}\n".format(var, self.__params[var]))
+                                updated_vars.add(var)
+                            else:
+                                f_out.write(line)
+                        else:
+                            f_out.write(line)
+                    # resolved.conf might not define all
+                    for var in self.__params:
+                        if not var in updated_vars:
+                            #print("Missing:", var)
+                            f_out.write(
+                                      "{}={}\n".format(var,
+                                                       self.__params[var]))
+            if run_as_root:
+                x = DnsResolverModel.commandAsRoot(password, 'cp', tmp_fn, conf_fn)
+                #p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
+                #                  'cp', tmp_fn, conf_fn),
+                #                 stdin=subprocess.PIPE,
+                #                 stdout=subprocess.PIPE,
+                #                 stderr=subprocess.PIPE)
+                #output = p.communicate(password.encode())
+                if x:
+                    msg = "Could not update '{}'; copy process terminated with {}".format(conf_fn, p.returncode)
+                    QMessageBox.critical(None, "Error", msg)
+
+            else:
+                os.copy(tmp_fn, conf_fn)
+            #os.remove(tmp_fn)
+
+        except IOError as e:
+            print("Cannot open", e)
+
+        if not self.__resolver == self.__resolver0:
+            if self.__resolver == SystemCtl.SVC_SYSTEMD_RESOLVED:
+                SystemCtl.startOrStop('stop', SystemCtl.SVC_PORTMASTER, password)
+                SystemCtl.startOrStop('start', SystemCtl.SVC_SYSTEMD_RESOLVED, password)
+            elif self.__resolver == SystemCtl.SVC_PORTMASTER:
+                SystemCtl.startOrStop('stop', SystemCtl.SVC_SYSTEMD_RESOLVED, password)
+                SystemCtl.startOrStop('start', SystemCtl.SVC_PORTMASTER, password)
+
         # Values saved, set status to 'not modified'
         self.__resolver = self.__resolver0
         self.__params = self.__params0.copy()
@@ -82,21 +183,47 @@ class DnsResolverModel():
 
     def is_modified(self):
         print("DnsResolverModel.is_modified")
+        print('resolver0 =', self.__resolver0, 'resolver =', self.__resolver)
         return not (self.__resolver == self.__resolver0 and self.__params == self.__params0)
 
-
     def resolver(self):
+        """ Returns the name of the current resolver. May be None."""
         return self.__resolver
 
 
+    def setResolver(self, resolver):
+        """ Sets the currently active resolver."""
+        assert(resolver in (SystemCtl.SVC_SYSTEMD_RESOLVED, SystemCtl.SVC_PORTMASTER))
+        self.__resolver = resolver
+
+
     def value(self, key):
+        """ Return the parameter value of associated with 'key'. """
         if key in self.__params:
             return self.__params[key]
         else:
             return None
 
     def setValue(self, key, value):
+        """ Set the parameter value of associated with 'key'. """
         self.__params[key] = value
+
+    @classmethod
+    def commandAsRoot(cls, password, cmd, *args):
+        """ Run a shell command as root.
+        """
+        execargs = ['/usr/bin/sudo', '-S', '-p', '']
+        execargs.append(cmd)
+        for arg in args:
+            execargs.append(arg)
+        print("Running", execargs)
+        p = subprocess.Popen((execargs),
+                             stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        output = p.communicate(password.encode())
+        print("Popen:", str(output[1]))
+        return p.returncode
 
 
 class DNSselector():
@@ -106,43 +233,41 @@ class DNSselector():
     The combobox allows for selecting a DNS provider (such as Google or Quad9)
     or manually entering an IPv4 address in dotted notation.
     """
-    def __init__(self, parent, model, layout, row, text, values):
+    def __init__(self, parent, model, layout, row, text, values, key):
 
         self.__parent = parent
         self.__model = model
+        self.__key = key
         self.__values = values
-        self.__ipaddr0 = values[0][1]
+        #self.__ipaddr0 = values[0][1]
+
+        ip = model.value(key)
+        provider = self.__provider_from_ip(ip)
 
         # Creates a label with the explanatory text, an option menu (to select
         # the DNS provider), and an entry field (chosen IP address)
         label = QLabel(text)
         layout.addWidget(label, row, 1)
-        #label.grid(row=row, column=0, sticky='W', **paddings)
 
         self.__servers_combo = QComboBox(parent)
         self.__servers_combo.addItems([q[0] for q in values])
+        self.__servers_combo.setCurrentText(provider)
         self.__servers_combo.currentTextChanged.connect(self.on_server_changed)
-        #self.__servers_combo['state'] = 'readonly'
-        #self.__servers_combo.bind('<<ComboboxSelected>>', self.on_server_changed)
-        self.__servers_combo.activated.connect(self.on_server_changed)
+        #self.__servers_combo.activated.connect(self.on_server_changed)
         layout.addWidget(self.__servers_combo, row, 2)
-        #self.__servers_combo.grid(row=row, column=1, sticky='W',
-        #                    **paddings)
 
-        #self.__ipaddr_txt = tk.StringVar()
         self.__ipaddr_entry = QLineEdit(parent)
-        #self.__ipaddr_entry.grid(row=row, column=2)
+        self.__ipaddr_entry.setText(ip)
+        self.__ipaddr_entry.editingFinished.connect(self.on_ip_changed)
         layout.addWidget(self.__ipaddr_entry, row, 3)
 
-        #self.__ipaddr_entry.bind('<Key-Return> ', self.on_ip_changed)
-        #self.__ipaddr_entry.bind('<FocusOut> ', self.on_ip_changed)
 
-
-    def get(self):
+    def get_unused(self):
         #return self.__ipaddr_txt.get()
         return self.__ipaddr_entry.get()
 
-    def set(self, value):
+    def set_unused(self, value):
+        """ """
         self.__ipaddr0 = value
         #print("Set '{}'".format(value))
         #self.__ipaddr_txt.set(value)
@@ -155,7 +280,7 @@ class DNSselector():
         for pair in self.__values:
             if pair[1] == ip:
                 return pair[0]
-        return ''
+        return 'Other'
 
     # Given a provide name return the IP address
     def __ip_from_provider(self, prov):
@@ -166,25 +291,27 @@ class DNSselector():
 
     # Invoked when the user selects a new server. The method updates the IP
     # address accordingly.
-    def on_server_changed(self, event):
-        #print('On server changed', event)
-        server = self.__servers_combo.currentText()
+    def on_server_changed(self, server):
+        print('On server changed; new server is', server)
+        #server = self.__servers_combo.currentText()
         #print("New value:", server)
-        i = [q[0] for q in self.__values].index(server)
-        ipaddr = self.__ip_from_provider(server)
-        self.__ipaddr_entry.setText(ipaddr)
-        self.__parent.on_value_changed()
+        #i = [q[0] for q in self.__values].index(server)
+        if not server == 'Other':
+            ipaddr = self.__ip_from_provider(server)
+            self.__ipaddr_entry.setText(ipaddr)
+            self.__model.setValue(self.__key, ipaddr)
+            self.__parent.on_value_changed()
 
 
     # Invoked when the IP address might have changed. The method updates the
     # server name according ly.
-    def on_ip_changed(self, event):
-        ip = self.__ipaddr_txt.get()
-        #print("on_ip_changed:", event, ip)
+    def on_ip_changed(self):
+        ip = self.__ipaddr_entry.text()
+        print("on ip changed; new ip is", ip)
         provider = self.__provider_from_ip(ip)
-        #print(provider)
-        #self.__servers_var.set(provider)
-        self.__servers_combo.set(provider)
+        #if provider not in self.__values: provider = 'Other'
+        self.__servers_combo.setCurrentText(provider)
+        self.__model.setValue(self.__key, ip)
         self.__parent.on_value_changed()
 
 
@@ -202,7 +329,7 @@ class DNSselector():
 
 
 class EnumSelector():
-    def __init__(self, parent, model, layout, row, text, values, key, **paddings):
+    def __init__(self, parent, model, layout, row, text, values, key):
 
         self.__parent = parent
         self.__model = model
@@ -263,8 +390,6 @@ class EnumSelector():
         self.__parent.on_value_changed()
 
 
-
-
 class MainGuiWindow(QMainWindow):
     """ Main application window.
     """
@@ -306,13 +431,14 @@ class MainGuiWindow(QMainWindow):
         self.__handlers = {}
         #self.__check_preconditions()
         self.__create_widgets(model)
-        self.__read_config(self.__config_fn)
+        self.on_value_changed()             # Convenient way to set button status
+        #self.__read_config(self.__config_fn)
 
 
     #
     # Read the DNS configuration from /etc/systemd/resolved.conf
     #
-    def __read_config(self, conf_fn):
+    def __read_config_unused(self, conf_fn):
         #print("Reading configuration ...")
         try:
             with open(conf_fn, 'r') as ifile:
@@ -336,7 +462,7 @@ class MainGuiWindow(QMainWindow):
     #
     # Save the modified configuration
     #
-    def __write_config(self, conf_fn, tmp_fn):
+    def __write_config_unused(self, conf_fn, tmp_fn):
         try:
             with open(conf_fn, 'r') as f_in:
                 with open(tmp_fn, 'w') as f_out:
@@ -365,7 +491,7 @@ class MainGuiWindow(QMainWindow):
 
 
     # Tests whether any value has been modified
-    def __any_value_modified(self):
+    def __any_value_modified_unused(self):
         """ Tests whether any of the embedded objects has changed."""
         for i in self.__handlers:
             if self.__handlers[i].is_modified():
@@ -396,25 +522,25 @@ class MainGuiWindow(QMainWindow):
 
         if self.__model.is_modified():
             print("... something changed")
-            if self.__run_as_root:
+            if self.__run_as_root or True:
                 # If the password has been previously set don't ask again
                 if not self.__password:
-                    self.__password = simpledialog.askstring("Password needed",
-                                                             "Password:",
-                                                             parent=self,
-                                                             show='*')
+                    self.__password, done = QInputDialog.getText(
+                        self, 'Password required', 'Enter your password:',
+                        echo=QLineEdit.Password)
                     #print("Password =", self.__password)
                 # If the user has actually entered a password then proceed.
-                if self.__password:
+                if done:
+                    self.__model.save(self.__config_fn, self.__run_as_root, self.__password)
                     # Write modified values to a temp file and ...
-                    self.__write_config(self.__config_fn, MainGuiWindow.__tmp_fn)
+                    #self.__write_config(self.__config_fn, MainGuiWindow.__tmp_fn)
                     # ... copy the temp file to /etc and restart the daemon
-                    if not self.__update_conf_file():
-                        return
+                    #if not self.__update_conf_file():
+                    #    return
                     #self.__run_helper_script(True)
-                    for i in self.__handlers:
-                        self.__handlers[i].config_written()
-                    self.__b_apply['state'] = tk.DISABLED
+                    #for i in self.__handlers:
+                    #    self.__handlers[i].config_written()
+                    self.__b_apply.setEnabled(False)
                     self.__b_close.setFocus()
             else:
                 # Run as normal user
@@ -454,12 +580,16 @@ class MainGuiWindow(QMainWindow):
         s = self.__systemd_resolver.checkState()
         if s:
             self.__portmaster.setChecked(False)
+            self.__model.setResolver(SystemCtl.SVC_SYSTEMD_RESOLVED)
+            self.on_value_changed()
 
 
     def __on_portmaster_changed(self, x):
         s = self.__portmaster.checkState()
         if s:
             self.__systemd_resolver.setChecked(False)
+            self.__model.setResolver(SystemCtl.SVC_PORTMASTER)
+            self.on_value_changed()
 
 
     #
@@ -478,21 +608,21 @@ class MainGuiWindow(QMainWindow):
         #widget.setLayout(main_layout)
 
         self.__systemd_resolver = QCheckBox("Systemd Resolver", widget)
-        #s = SystemCtl.status("systemd-resolved.service")
-        if model.resolver() == 'systemd-resolved':
+        #s = SystemCtl.status(SystemCtl.SVC_SYSTEMD_RESOLVED)
+        if model.resolver() == SystemCtl.SVC_SYSTEMD_RESOLVED:
             self.__systemd_resolver.setChecked(True)
         self.__systemd_resolver.stateChanged.connect(self.__on_systemd_resolver_changed)
         main_layout.addWidget(self.__systemd_resolver)
 
         row = 0
         # parent, model, layout, row, text, values
-        h = DNSselector(self, model, config_area, row=row, text='DNS server',
-                        values=MainGuiWindow.DNSproviders)
+        h = DNSselector(self, model, config_area, row, 'DNS server',
+                        MainGuiWindow.DNSproviders, 'DNS')
         self.__handlers['DNS'] = h
 
         row = row + 1
-        h = DNSselector(self, model, config_area, row=row, text='Fallback DNS server',
-                        values=MainGuiWindow.DNSproviders)
+        h = DNSselector(self, model, config_area, row, 'Fallback DNS server',
+                        MainGuiWindow.DNSproviders, 'FallbackDNS')
         self.__handlers['FallbackDNS'] = h
 
         row = row + 1
@@ -525,7 +655,7 @@ class MainGuiWindow(QMainWindow):
         main_layout.addLayout(config_area)
 
         self.__portmaster = QCheckBox("Portmaster", widget)
-        if model.resolver() == 'portmaster':
+        if model.resolver() == SystemCtl.SVC_PORTMASTER:
             self.__portmaster.setChecked(True)
         self.__portmaster.stateChanged.connect(self.__on_portmaster_changed)
 
@@ -575,7 +705,7 @@ class MainGuiWindow(QMainWindow):
             # Restart the resolver0 service
             p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
                                   'systemctl', 'restart',
-                                  'systemd-resolved.service'),
+                                  SystemCtl.SVC_SYSTEMD_RESOLVED),
                                  stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
