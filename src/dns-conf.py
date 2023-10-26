@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 
-""" Simple graphical tool to configure DNS resolvers on Ubuntu and similar platforms.
+"""Simple graphical tool to configure DNS resolvers on Ubuntu and similar
+platforms.
+
 """
 
 from PyQt5.QtGui import *
@@ -18,6 +20,13 @@ import sys                      # TODO Remove, use argparse
 #
 # TODO RETURN key
 #
+# TODO Wait curser when services are switched
+#
+# FIXME Switching back and forth between resolvers does not work.
+#
+# FIXME Handle failures in DnsResolverModel.save()
+#
+
 
 #
 # https://web.archive.org/web/20201112011230/http://effbot.org/tkinterbook/grid.htm
@@ -33,6 +42,8 @@ import sys                      # TODO Remove, use argparse
 # TODO Assign default values to all variables so that they have sensible
 # values even when not present in resolved.conf.
 #
+
+#verbose = False
 
 
 class SystemCtl():
@@ -145,20 +156,14 @@ class DnsResolverModel():
                     # resolved.conf might not define all
                     for var in self.__params:
                         if not var in updated_vars:
-                            #print("Missing:", var)
+                            if verbose: print("Missing:", var)
                             f_out.write(
                                       "{}={}\n".format(var,
                                                        self.__params[var]))
             if run_as_root:
                 x = DnsResolverModel.commandAsRoot(password, 'cp', tmp_fn, conf_fn)
-                #p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
-                #                  'cp', tmp_fn, conf_fn),
-                #                 stdin=subprocess.PIPE,
-                #                 stdout=subprocess.PIPE,
-                #                 stderr=subprocess.PIPE)
-                #output = p.communicate(password.encode())
                 if x:
-                    msg = "Could not update '{}'; copy process terminated with {}".format(conf_fn, p.returncode)
+                    msg = "Could not update '{}'; copy process terminated with {}".format(conf_fn, x.returncode)
                     QMessageBox.critical(None, "Error", msg)
 
             else:
@@ -169,16 +174,18 @@ class DnsResolverModel():
             print("Cannot open", e)
 
         if not self.__resolver == self.__resolver0:
+            print("Starting systemctl ...")
             if self.__resolver == SystemCtl.SVC_SYSTEMD_RESOLVED:
                 SystemCtl.startOrStop('stop', SystemCtl.SVC_PORTMASTER, password)
                 SystemCtl.startOrStop('start', SystemCtl.SVC_SYSTEMD_RESOLVED, password)
             elif self.__resolver == SystemCtl.SVC_PORTMASTER:
                 SystemCtl.startOrStop('stop', SystemCtl.SVC_SYSTEMD_RESOLVED, password)
                 SystemCtl.startOrStop('start', SystemCtl.SVC_PORTMASTER, password)
+            print(".. finished")
 
         # Values saved, set status to 'not modified'
-        self.__resolver = self.__resolver0
-        self.__params = self.__params0.copy()
+        self.__resolver0 = self.__resolver
+        self.__params0 = self.__params.copy()
 
 
     def is_modified(self):
@@ -239,7 +246,6 @@ class DNSselector():
         self.__model = model
         self.__key = key
         self.__values = values
-        #self.__ipaddr0 = values[0][1]
 
         ip = model.value(key)
         provider = self.__provider_from_ip(ip)
@@ -253,27 +259,24 @@ class DNSselector():
         self.__servers_combo.addItems([q[0] for q in values])
         self.__servers_combo.setCurrentText(provider)
         self.__servers_combo.currentTextChanged.connect(self.on_server_changed)
-        #self.__servers_combo.activated.connect(self.on_server_changed)
         layout.addWidget(self.__servers_combo, row, 2)
 
         self.__ipaddr_entry = QLineEdit(parent)
         self.__ipaddr_entry.setText(ip)
-        self.__ipaddr_entry.editingFinished.connect(self.on_ip_changed)
+        self.__ipaddr_entry.textEdited.connect(self.on_ip_changed)
         layout.addWidget(self.__ipaddr_entry, row, 3)
 
 
     def get_unused(self):
-        #return self.__ipaddr_txt.get()
         return self.__ipaddr_entry.get()
+
 
     def set_unused(self, value):
         """ """
         self.__ipaddr0 = value
-        #print("Set '{}'".format(value))
-        #self.__ipaddr_txt.set(value)
         provider = self.__provider_from_ip(value)
-        #print(provider)
         self.__servers_combo.setCurrentText(provider)
+
 
     # Given an IP address return the provider name
     def __provider_from_ip(self, ip):
@@ -293,9 +296,6 @@ class DNSselector():
     # address accordingly.
     def on_server_changed(self, server):
         print('On server changed; new server is', server)
-        #server = self.__servers_combo.currentText()
-        #print("New value:", server)
-        #i = [q[0] for q in self.__values].index(server)
         if not server == 'Other':
             ipaddr = self.__ip_from_provider(server)
             self.__ipaddr_entry.setText(ipaddr)
@@ -305,14 +305,21 @@ class DNSselector():
 
     # Invoked when the IP address might have changed. The method updates the
     # server name according ly.
-    def on_ip_changed(self):
-        ip = self.__ipaddr_entry.text()
+    def on_ip_changed(self, ip):
+        #ip = self.__ipaddr_entry.text()
         print("on ip changed; new ip is", ip)
         provider = self.__provider_from_ip(ip)
-        #if provider not in self.__values: provider = 'Other'
         self.__servers_combo.setCurrentText(provider)
         self.__model.setValue(self.__key, ip)
         self.__parent.on_value_changed()
+
+
+    def on_ip_text_changed_unused(self, x):
+        print("Text changed:", x)
+
+
+    def on_ip_text_edited_unused(self, newText):
+        print("Text edited:", newText)
 
 
     # Called after the value has been successfully saved. The instance is
@@ -323,8 +330,9 @@ class DNSselector():
 
     # Checks if a widget's value has been modified and needs to be saved.
     def is_modified(self):
-        #print("DNSselector.is_modified: v0={}, v={}".format(self.__ipaddr0,
-        #                                                    self.__ipaddr_txt.get()))
+        if verbose:
+            print("DNSselector.is_modified: v0={}, v={}".format(self.__ipaddr0,
+                                                            self.__ipaddr_txt.get()))
         return self.__ipaddr0 != self.__ipaddr_entry.text()
 
 
@@ -347,22 +355,13 @@ class EnumSelector():
 
         self.__label = QLabel(text)
         layout.addWidget(self.__label, row, 1)
-        #self.__label.grid(row=row, column=0, sticky='W',
-        #                  **paddings)
 
         self.__value_combo = QComboBox(parent)
 
         # Initialise with the 1st value of the list of valid values:
-        #self.__value_combo.set(values[0])
         layout.addWidget(self.__value_combo, row, 2)
-        #self.__value_combo.grid(row=row, column=1, sticky='W',
-        #                        **paddings)
-        #self.__value_combo['values'] = values
         self.__value_combo.addItems(values)
-        #self.__value_combo['state'] = 'readonly'
-
-        #self.__value_combo.bind('<<ComboboxSelected>> ',
-        #                        self.__on_value_changed)
+        self.__value_combo.setCurrentText(self.__model.value(key))
         self.__value_combo.currentIndexChanged.connect(self.__on_value_changed)
 
     def get(self):
@@ -378,11 +377,11 @@ class EnumSelector():
     def config_written(self):
         self.__value0 = self.__value_combo.get()
 
+
     # Checks i the value has been modified.
     def is_modified(self):
-        #print("EnumSelector.is_modified:",
-        #      self.__value0, self.__value_combo.get())
         return self.__value0 != self.__value_combo.currentText()
+
 
     def __on_value_changed(self, index):
         print("EnumSelector.on_value_changed:", self.__key, self.__values[index], index)
@@ -429,10 +428,8 @@ class MainGuiWindow(QMainWindow):
         self.__password = None
 
         self.__handlers = {}
-        #self.__check_preconditions()
         self.__create_widgets(model)
         self.on_value_changed()             # Convenient way to set button status
-        #self.__read_config(self.__config_fn)
 
 
     #
@@ -505,12 +502,10 @@ class MainGuiWindow(QMainWindow):
         #print("Value of some widget has changed!", m)
         if m:
             # Modified, enable 'apply' button and set focus to it.
-            #self.__b_apply['state'] = tk.NORMAL
             self.__b_apply.setEnabled(True)
             self.__b_apply.setFocus()
         else:
             # Nothing modified; disable 'apply' button and set focus to 'close'.
-            #self.__b_apply['state'] = tk.DISABLED
             self.__b_apply.setEnabled(False)
             self.__b_close.setFocus()
 
@@ -522,34 +517,29 @@ class MainGuiWindow(QMainWindow):
 
         if self.__model.is_modified():
             print("... something changed")
-            if self.__run_as_root or True:
+            if self.__run_as_root:
                 # If the password has been previously set don't ask again
                 if not self.__password:
                     self.__password, done = QInputDialog.getText(
                         self, 'Password required', 'Enter your password:',
                         echo=QLineEdit.Password)
-                    #print("Password =", self.__password)
-                # If the user has actually entered a password then proceed.
-                if done:
-                    self.__model.save(self.__config_fn, self.__run_as_root, self.__password)
-                    # Write modified values to a temp file and ...
-                    #self.__write_config(self.__config_fn, MainGuiWindow.__tmp_fn)
-                    # ... copy the temp file to /etc and restart the daemon
-                    #if not self.__update_conf_file():
-                    #    return
-                    #self.__run_helper_script(True)
-                    #for i in self.__handlers:
-                    #    self.__handlers[i].config_written()
-                    self.__b_apply.setEnabled(False)
-                    self.__b_close.setFocus()
+                    # If the user has actually entered a password then proceed.
+                    if not done:
+                        # No password entered
+                        self.__password = None
+                        return
+    
+                # Password known, proceed
+                self.__model.save(self.__config_fn, self.__run_as_root, self.__password)
+                #self.__b_apply.setEnabled(False)
+                #self.__b_close.setFocus()
+                self.on_value_changed()
             else:
                 # Run as normal user
-                # Write modified values to a temp file and ...
-                #self.__write_config(self.__config_fn, MainGuiWindow.__tmp_fn)
                 self.__model.save(self.__config_fn, self.__run_as_root)
                 self.on_value_changed()
         else:
-            print("... nothing changed")
+            if verbose: print("... nothing changed")
 
 
     def __on_close(self):
@@ -578,6 +568,7 @@ class MainGuiWindow(QMainWindow):
 
     def __on_systemd_resolver_changed(self, x):
         s = self.__systemd_resolver.checkState()
+        print("Systemd resolver clicked", s)
         if s:
             self.__portmaster.setChecked(False)
             self.__model.setResolver(SystemCtl.SVC_SYSTEMD_RESOLVED)
@@ -586,6 +577,7 @@ class MainGuiWindow(QMainWindow):
 
     def __on_portmaster_changed(self, x):
         s = self.__portmaster.checkState()
+        print("Portmaster clicked", s)
         if s:
             self.__systemd_resolver.setChecked(False)
             self.__model.setResolver(SystemCtl.SVC_PORTMASTER)
@@ -666,7 +658,7 @@ class MainGuiWindow(QMainWindow):
         self.setCentralWidget(widget)
 
 
-    def __update_conf_file(self):
+    def __update_conf_file_unused(self):
         """ Updates the conf file in /etc.
 
         Steps are:
@@ -696,8 +688,6 @@ class MainGuiWindow(QMainWindow):
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output = p.communicate(self.__password.encode())
-            #print("__update_conf_file return code:", p.returncode,
-            #      output[0], output[1])
             if p.returncode != 0:
                 QMessageBox.showerror("Error", output[1])
                 return False
@@ -710,8 +700,6 @@ class MainGuiWindow(QMainWindow):
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output = p.communicate(self.__password.encode())
-            #print("__update_conf_file return code:", p.returncode,
-            #      output[0], output[1])
             if p.returncode != 0:
                 QMessageBox.showerror("Error", output[1])
                 return False
@@ -732,7 +720,13 @@ if __name__ == '__main__':
     parser.add_argument('--no-root',
                         action='store_true',
                         help='do not run as root; default is to run as root')
+    parser.add_argument('--verbose',
+                        action='store_true',
+                        help='Print debug info')
     args = parser.parse_args()
+
+    global verbose
+    verbose = args.verbose
 
     model = DnsResolverModel(args.config)
     app = QApplication(sys.argv)
