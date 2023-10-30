@@ -17,13 +17,8 @@ It contains two components:
 
 ![Screenshot](screenshot.png)
 
-For security reasons, the bash script has to be placed in a directory to which
-the user does not have write access. Otherwise malicious software running in
-the context of the user could modify the script and perform arbitrary actions
-with root privileges.
-
-The applet runs on the Cinnamon desktop and interacts with the systemd DNS
-resolver.
+The applet runs on the Cinnamon desktop and interacts with systemd to switch
+between Portmaster dn the system DNS resolver.
 
 ## Installation
 
