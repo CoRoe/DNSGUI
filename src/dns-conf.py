@@ -16,15 +16,16 @@ import argparse
 import sys                      # TODO Remove, use argparse
 
 #
-# TODO Don't reqrite the configuration file if only the local resolver has changed.
+# TODO Don't rewrite the configuration file if only the local resolver has
+# changed.
 #
-# TODO RETURN key
+# TODO: RETURN key
 #
-# TODO Wait curser when services are switched
+# TODO: Handle the error case that both resolvers are running.
 #
-# FIXME Switching back and forth between resolvers does not work.
+# FIXME: Switching back and forth between resolvers does not work.
 #
-# FIXME Handle failures in DnsResolverModel.save()
+# FIXME: Handle failures in DNSConfigurationModel.save()
 #
 
 
@@ -42,8 +43,6 @@ import sys                      # TODO Remove, use argparse
 # TODO Assign default values to all variables so that they have sensible
 # values even when not present in resolved.conf.
 #
-
-#verbose = False
 
 
 class SystemCtl():
@@ -64,6 +63,7 @@ class SystemCtl():
         output = p.communicate()
         print("Return code", p.returncode)
         return p.returncode
+
 
     @classmethod
     def startOrStop(cls, command, service, password=None):
@@ -92,8 +92,8 @@ class SystemCtl():
         return True
 
 
-class DnsResolverModel():
-    """ Models the data that is visualized by the MainGuiWindow.
+class DNSConfigurationModel():
+    """ Models the data that is visualized by the DNSConfigurationrView.
     """
     def __init__(self, conf_fn):
 
@@ -136,7 +136,7 @@ class DnsResolverModel():
 
         if run_as_root: assert(password)
 
-        print("DnsResolverModel.save")
+        print("DNSConfigurationModel.save")
         try:
             with open(conf_fn, 'r') as f_in:
                 with open(tmp_fn, 'w') as f_out:
@@ -161,14 +161,13 @@ class DnsResolverModel():
                                       "{}={}\n".format(var,
                                                        self.__params[var]))
             if run_as_root:
-                x = DnsResolverModel.commandAsRoot(password, 'cp', tmp_fn, conf_fn)
+                x = DNSConfigurationModel.commandAsRoot(password, 'cp', tmp_fn, conf_fn)
                 if x:
-                    msg = "Could not update '{}'; copy process terminated with {}".format(conf_fn, x.returncode)
+                    msg = "Could not update '{}'; copy process terminated with {}".format(conf_fn, x)
                     QMessageBox.critical(None, "Error", msg)
 
             else:
                 os.copy(tmp_fn, conf_fn)
-            #os.remove(tmp_fn)
 
         except IOError as e:
             print("Cannot open", e)
@@ -183,15 +182,25 @@ class DnsResolverModel():
                 SystemCtl.startOrStop('start', SystemCtl.SVC_PORTMASTER, password)
             print(".. finished")
 
+        # To be on the safe side read the services status:
+        if SystemCtl.status(SystemCtl.SVC_SYSTEMD_RESOLVED) == 0:
+            self.__resolver = SystemCtl.SVC_SYSTEMD_RESOLVED
+        elif SystemCtl.status(SystemCtl.SVC_PORTMASTER) == 0:
+            self.__resolver = SystemCtl.SVC_PORTMASTER
+        else:
+            self.__resolver = None
+
         # Values saved, set status to 'not modified'
         self.__resolver0 = self.__resolver
         self.__params0 = self.__params.copy()
 
 
     def is_modified(self):
-        print("DnsResolverModel.is_modified")
+        """ Check if the model is modified. """
+        print("DNSConfigurationModel.is_modified")
         print('resolver0 =', self.__resolver0, 'resolver =', self.__resolver)
         return not (self.__resolver == self.__resolver0 and self.__params == self.__params0)
+
 
     def resolver(self):
         """ Returns the name of the current resolver. May be None."""
@@ -267,18 +276,6 @@ class DNSselector():
         layout.addWidget(self.__ipaddr_entry, row, 3)
 
 
-    def get_unused(self):
-        return self.__ipaddr_entry.get()
-
-
-    def set_unused(self, value):
-        """ """
-        self.__ipaddr0 = value
-        provider = self.__provider_from_ip(value)
-        self.__servers_combo.setCurrentText(provider)
-
-
-    # Given an IP address return the provider name
     def __provider_from_ip(self, ip):
         for pair in self.__values:
             if pair[1] == ip:
@@ -295,7 +292,11 @@ class DNSselector():
     # Invoked when the user selects a new server. The method updates the IP
     # address accordingly.
     def on_server_changed(self, server):
-        print('On server changed; new server is', server)
+        """ Called by a server selection widget when the selection has changed.
+
+        Notifies the parent of the change.
+        """
+        print('DNSselector: On server changed; new server is', server)
         if not server == 'Other':
             ipaddr = self.__ip_from_provider(server)
             self.__ipaddr_entry.setText(ipaddr)
@@ -306,34 +307,11 @@ class DNSselector():
     # Invoked when the IP address might have changed. The method updates the
     # server name according ly.
     def on_ip_changed(self, ip):
-        #ip = self.__ipaddr_entry.text()
-        print("on ip changed; new ip is", ip)
+        print("DNSselector: on ip changed; new ip is", ip)
         provider = self.__provider_from_ip(ip)
         self.__servers_combo.setCurrentText(provider)
         self.__model.setValue(self.__key, ip)
         self.__parent.on_value_changed()
-
-
-    def on_ip_text_changed_unused(self, x):
-        print("Text changed:", x)
-
-
-    def on_ip_text_edited_unused(self, newText):
-        print("Text edited:", newText)
-
-
-    # Called after the value has been successfully saved. The instance is
-    # flagged as 'not modified'.
-    def config_written(self):
-        self.__ipaddr0 = self.__ipaddr_txt.get()
-
-
-    # Checks if a widget's value has been modified and needs to be saved.
-    def is_modified(self):
-        if verbose:
-            print("DNSselector.is_modified: v0={}, v={}".format(self.__ipaddr0,
-                                                            self.__ipaddr_txt.get()))
-        return self.__ipaddr0 != self.__ipaddr_entry.text()
 
 
 class EnumSelector():
@@ -364,23 +342,15 @@ class EnumSelector():
         self.__value_combo.setCurrentText(self.__model.value(key))
         self.__value_combo.currentIndexChanged.connect(self.__on_value_changed)
 
+
     def get(self):
         return self.__value_combo.get()
+
 
     def set(self, v):
         self.__value_combo.setCurrentText(v)
         self.__value0 = v
-        #print("EnumSelector.set: ", self.__value0, self.__value_combo.get())
-
-    # Called after the value has been successfully saved. The instance is
-    # flagged as 'not modified'.
-    def config_written(self):
-        self.__value0 = self.__value_combo.get()
-
-
-    # Checks i the value has been modified.
-    def is_modified(self):
-        return self.__value0 != self.__value_combo.currentText()
+        if verbose: print("EnumSelector.set: ", self.__value0, self.__value_combo.get())
 
 
     def __on_value_changed(self, index):
@@ -389,7 +359,7 @@ class EnumSelector():
         self.__parent.on_value_changed()
 
 
-class MainGuiWindow(QMainWindow):
+class DNSConfigurationrView(QMainWindow):
     """ Main application window.
     """
 
@@ -409,16 +379,12 @@ class MainGuiWindow(QMainWindow):
                     ['Google',     '8.8.8.8'],
                     ['Cloudflare', '1.1.1.1'],
                     ['Other',      '']]
-    __paddings = {'padx': 10, 'pady': 10}
-    __tmp_fn = '/tmp/resolved.conf'
-    __resolved_service = 'systemd-resolved'
-
 
     #
     # Class constructor
     #
     def __init__(self, model, config_fn, run_as_root, script_path):
-        super(MainGuiWindow, self).__init__()
+        super(DNSConfigurationrView, self).__init__()
 
         self.__run_as_root = run_as_root
         self.__script_path = script_path
@@ -432,74 +398,14 @@ class MainGuiWindow(QMainWindow):
         self.on_value_changed()             # Convenient way to set button status
 
 
-    #
-    # Read the DNS configuration from /etc/systemd/resolved.conf
-    #
-    def __read_config_unused(self, conf_fn):
-        #print("Reading configuration ...")
-        try:
-            with open(conf_fn, 'r') as ifile:
-                for line in ifile:
-                    # Extract key and value.
-                    try:
-                        m = re.match('^([A-Za-z]+)=([a-z0-9.-]+)', line[:-1])
-                        if m:
-                            key = m.group(1)
-                            value = m.group(2)
-                            # If a widget is defined for the particular key
-                            # then call the set() method of the widget.
-                            if key in self.__handlers:
-                                self.__handlers[key].set(value)
-                    except re.error as e:
-                        print("RE problem", e)
-        except IOError as e:
-            print("Cannot open", conf_fn, e)
-
-
-    #
-    # Save the modified configuration
-    #
-    def __write_config_unused(self, conf_fn, tmp_fn):
-        try:
-            with open(conf_fn, 'r') as f_in:
-                with open(tmp_fn, 'w') as f_out:
-                    updated_vars = set()
-                    for line in f_in:
-                        m = re.match('^([A-Za-z]+)=', line)
-                        if m:
-                            var = m.group(1)
-                            if var in self.__handlers:
-                                f_out.write(
-                                      "{}={}\n".format(var, self.__handlers[var].get()))
-                                updated_vars.add(var)
-                            else:
-                                f_out.write(line)
-                        else:
-                            f_out.write(line)
-                    # resolved.conf might not define all
-                    for var in self.__handlers:
-                        if not var in updated_vars:
-                            #print("Missing:", var)
-                            f_out.write(
-                                      "{}={}\n".format(var,
-                                                       self.__handlers[var].get()))
-        except IOErr as e:
-            print("Cannot open", e)
-
-
-    # Tests whether any value has been modified
-    def __any_value_modified_unused(self):
-        """ Tests whether any of the embedded objects has changed."""
-        for i in self.__handlers:
-            if self.__handlers[i].is_modified():
-               return True
-        return False
-
-
-    # Called by widgets when their values change
     def on_value_changed(self):
+        """ Update 'apply' and 'close buttens according to the state of
+        the model.
+
+        Widgets should call this methon after each user interaction.
+        """
         m = self.__model.is_modified()
-        #print("Value of some widget has changed!", m)
+        if verbose: print("Value of some widget has changed!", m)
         if m:
             # Modified, enable 'apply' button and set focus to it.
             self.__b_apply.setEnabled(True)
@@ -517,6 +423,7 @@ class MainGuiWindow(QMainWindow):
 
         if self.__model.is_modified():
             print("... something changed")
+            self.setCursor(Qt.WaitCursor)
             if self.__run_as_root:
                 # If the password has been previously set don't ask again
                 if not self.__password:
@@ -527,33 +434,36 @@ class MainGuiWindow(QMainWindow):
                     if not done:
                         # No password entered
                         self.__password = None
-                        return
-    
-                # Password known, proceed
-                self.__model.save(self.__config_fn, self.__run_as_root, self.__password)
-                #self.__b_apply.setEnabled(False)
-                #self.__b_close.setFocus()
+
+            if self.__run_as_root:
+                # Run as root
+                if self.__password:
+                    self.__model.save(self.__config_fn, self.__run_as_root, self.__password)
+                else:
+                    if verbose: print("No password specified")
                 self.on_value_changed()
             else:
                 # Run as normal user
                 self.__model.save(self.__config_fn, self.__run_as_root)
                 self.on_value_changed()
+            self.unsetCursor()
         else:
             if verbose: print("... nothing changed")
+
+
 
 
     def __on_close(self):
         """
         Close button pressed
         """
-        #if self.__any_value_modified():
         if self.__model.is_modified():
             answer = QMessageBox.question(self,
                                           'Exit Application',
                                            'Discard changes?',
                                            QMessageBox.Yes | QMessageBox.No)
             if answer == QMessageBox.Yes:
-                #print("Discarding changes")
+                if verbose: print("Discarding changes")
                 QCoreApplication.quit()
         else:
             QCoreApplication.quit()
@@ -589,7 +499,7 @@ class MainGuiWindow(QMainWindow):
     # conf file.
     #
     def __create_widgets(self, model):
-        assert(type(model) == DnsResolverModel)
+        assert(type(model) == DNSConfigurationModel)
 
         self.setWindowTitle("DNS Configuration")
 
@@ -597,28 +507,24 @@ class MainGuiWindow(QMainWindow):
         config_area = QGridLayout()
         button_area = QHBoxLayout()
         widget = QWidget()
-        #widget.setLayout(main_layout)
 
         self.__systemd_resolver = QCheckBox("Systemd Resolver", widget)
-        #s = SystemCtl.status(SystemCtl.SVC_SYSTEMD_RESOLVED)
         if model.resolver() == SystemCtl.SVC_SYSTEMD_RESOLVED:
             self.__systemd_resolver.setChecked(True)
         self.__systemd_resolver.stateChanged.connect(self.__on_systemd_resolver_changed)
         main_layout.addWidget(self.__systemd_resolver)
 
         row = 0
-        # parent, model, layout, row, text, values
         h = DNSselector(self, model, config_area, row, 'DNS server',
-                        MainGuiWindow.DNSproviders, 'DNS')
+                        DNSConfigurationrView.DNSproviders, 'DNS')
         self.__handlers['DNS'] = h
 
         row = row + 1
         h = DNSselector(self, model, config_area, row, 'Fallback DNS server',
-                        MainGuiWindow.DNSproviders, 'FallbackDNS')
+                        DNSConfigurationrView.DNSproviders, 'FallbackDNS')
         self.__handlers['FallbackDNS'] = h
 
         row = row + 1
-        # parent, layout, row, text, values, key, **paddings
         h = EnumSelector(self, model, config_area, row, 'DNS over TLS',
                          ['no', 'yes', 'opportunistic'], 'DNSOverTLS')
         self.__handlers['DNSOverTLS'] = h
@@ -631,19 +537,12 @@ class MainGuiWindow(QMainWindow):
         row = row + 1
         self.__b_apply = QPushButton(text="Apply")
         self.__b_apply.clicked.connect(self.__on_apply)
-        #self.__b_apply['state'] = tk.DISABLED
-        #self.__b_apply.grid(row=row, column=2, sticky=tk.E,
-        #                    **MainGuiWindow.__paddings)
         button_area.addWidget(self.__b_apply)
 
         self.__b_close = QPushButton(text="Close")
         self.__b_close.clicked.connect(self.__on_close)
-        #self.__b_close.grid(row=row, column=3, sticky=tk.W,
-        #                    **MainGuiWindow.__paddings)
         button_area.addWidget(self.__b_close)
-        #self.__b_close.setFocus()
 
-        #self.bind('<Return>', self.__on_return_event)
         main_layout.addLayout(config_area)
 
         self.__portmaster = QCheckBox("Portmaster", widget)
@@ -656,58 +555,6 @@ class MainGuiWindow(QMainWindow):
         main_layout.addLayout(button_area)
         widget.setLayout(main_layout)
         self.setCentralWidget(widget)
-
-
-    def __update_conf_file_unused(self):
-        """ Updates the conf file in /etc.
-
-        Steps are:
-        - Copy conf file to backup file
-        - Copy temp file to conf file
-        - Restart resolver0 service
-        """
-
-        try:
-            # Copy conf file to backup file
-            p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '', 'cp',
-                                  self.__config_fn, self.__config_fn + '.bak'),
-                                 stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
-            output = p.communicate(self.__password.encode())
-            #print("__update_conf_file return code:", p.returncode,
-            #      output[0], output[1])
-            if p.returncode != 0:
-                QMessageBox.showerror("Error", output[1])
-                return False
-
-            # Copy temp file to conf file
-            p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '', 'cp',
-                                  self.__tmp_fn, self.__config_fn),
-                                 stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
-            output = p.communicate(self.__password.encode())
-            if p.returncode != 0:
-                QMessageBox.showerror("Error", output[1])
-                return False
-
-            # Restart the resolver0 service
-            p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
-                                  'systemctl', 'restart',
-                                  SystemCtl.SVC_SYSTEMD_RESOLVED),
-                                 stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
-            output = p.communicate(self.__password.encode())
-            if p.returncode != 0:
-                QMessageBox.showerror("Error", output[1])
-                return False
-
-            return True
-
-        except Exception as e:
-            print("__update_conf_file exception", e)
 
 
 if __name__ == '__main__':
@@ -728,9 +575,9 @@ if __name__ == '__main__':
     global verbose
     verbose = args.verbose
 
-    model = DnsResolverModel(args.config)
+    model = DNSConfigurationModel(args.config)
     app = QApplication(sys.argv)
-    root_window = MainGuiWindow(model, config_fn=args.config,
+    root_window = DNSConfigurationrView(model, config_fn=args.config,
                                 run_as_root=not args.no_root,
                                 script_path=os.path.abspath( __file__ ))
     root_window.show()
