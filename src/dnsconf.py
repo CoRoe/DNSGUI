@@ -6,7 +6,7 @@ platforms.
 """
 
 from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
+from PyQt5.QtWidgets import QMessageBox, QLabel, QLineEdit, QComboBox, QMainWindow, QApplication, QInputDialog, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QPushButton, QCheckBox
 from PyQt5.QtCore import *
 
 import re
@@ -27,20 +27,9 @@ import sys                      # TODO Remove, use argparse
 #
 # FIXME: Handle failures in DNSConfigurationModel.save()
 #
-
-
+# TODO: Allow white space around the '=' signs in the configuration file.
 #
-# https://web.archive.org/web/20201112011230/http://effbot.org/tkinterbook/grid.htm
-# https://www.pythontutorial.net/tkinter/tkinter-optionmenu/
-# https://www.tutorialspoint.com/python/tk_entry.htm
-#
-# Password entry: https://stackoverflow.com/questions/15724658/simplest-method-of-asking-user-for-password-using-graphical-dialog-in-python
-#
-# Sudo: https://www.python-forum.de/viewtopic.php?t=1393
-#
-# TODO Allow white space around the '=' signs in the configuration file.
-#
-# TODO Assign default values to all variables so that they have sensible
+# TODO: Assign default values to all variables so that they have sensible
 # values even when not present in resolved.conf.
 #
 

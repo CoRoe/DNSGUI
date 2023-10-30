@@ -17,8 +17,8 @@ MyApplet.prototype = {
     },
 
     on_applet_clicked: function() {
-	// TODO Do not use hard-coded path
-        Util.spawn(["/usr/local/bin/dns-conf.py"]);
+	// TODO: Do not use hard-coded path
+        Util.spawn(["/usr/local/bin/dnsconf.py"]);
     }
 };
 

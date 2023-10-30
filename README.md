@@ -8,7 +8,7 @@ captive portal that the secure DNS queries.
 
 It contains two components:
 
-  * A GUI written in Python 3 TK (*/usr/local/bin/dns-conf.py*); it is
+  * A GUI written in PyQt5 (*/usr/local/bin/dnsconf.py*); it is
     essentially an editor for the configuration file
     */etc/systemd/resolved.conf*.
 
