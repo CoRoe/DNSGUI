@@ -85,6 +85,9 @@ class DNSConfigurationModel():
     """ Models the data that is visualized by the DNSConfigurationrView.
     """
     def __init__(self, conf_fn):
+        """ Create the model, populating it with data read from configuration
+        files and systemd service status.
+        """
 
         if SystemCtl.status(SystemCtl.SVC_SYSTEMD_RESOLVED) == 0:
             self.__resolver0 = SystemCtl.SVC_SYSTEMD_RESOLVED
@@ -304,6 +307,12 @@ class DNSselector():
 
 
 class EnumSelector():
+    """Wrapper class for a list widget.
+    
+    When the user changes the selection, the wrapper updates the model and
+    calls an 'on change' callback of the parent object.
+
+    """
     def __init__(self, parent, model, layout, row, text, values, key):
 
         self.__parent = parent
@@ -322,7 +331,6 @@ class EnumSelector():
 
         self.__label = QLabel(text)
         layout.addWidget(self.__label, row, 1)
-
         self.__value_combo = QComboBox(parent)
 
         # Initialise with the 1st value of the list of valid values:
@@ -330,16 +338,6 @@ class EnumSelector():
         self.__value_combo.addItems(values)
         self.__value_combo.setCurrentText(self.__model.value(key))
         self.__value_combo.currentIndexChanged.connect(self.__on_value_changed)
-
-
-    def get(self):
-        return self.__value_combo.get()
-
-
-    def set(self, v):
-        self.__value_combo.setCurrentText(v)
-        self.__value0 = v
-        if verbose: print("EnumSelector.set: ", self.__value0, self.__value_combo.get())
 
 
     def __on_value_changed(self, index):
@@ -365,6 +363,7 @@ class DNSConfigurationrView(QMainWindow):
 
     DNSproviders = [['Quad9',      '9.9.9.9'],
                     ['DNSforge',   '176.9.93.198'],
+                    ['dismail',    '116.203.32.217'],
                     ['Google',     '8.8.8.8'],
                     ['Cloudflare', '1.1.1.1'],
                     ['Other',      '']]
@@ -372,17 +371,14 @@ class DNSConfigurationrView(QMainWindow):
     #
     # Class constructor
     #
-    def __init__(self, model, config_fn, run_as_root, script_path):
+    def __init__(self, model, config_fn, run_as_root):
         super(DNSConfigurationrView, self).__init__()
 
         self.__run_as_root = run_as_root
-        self.__script_path = script_path
-        self.__helper_path = self.__script_path.replace(".py", ".helper.sh")
         self.__config_fn = config_fn
         self.__model = model
         self.__password = None
 
-        self.__handlers = {}
         self.__create_widgets(model)
         self.on_value_changed()             # Convenient way to set button status
 
@@ -503,25 +499,30 @@ class DNSConfigurationrView(QMainWindow):
         self.__systemd_resolver.stateChanged.connect(self.__on_systemd_resolver_changed)
         main_layout.addWidget(self.__systemd_resolver)
 
+        # Create the wrapper objects of the widgets.
+        #
+        # Note that they have to be assigned to some instance variables; if
+        # they weren't, garbage collection would free the objects and the
+        # widgets won't work properly.
         row = 0
-        h = DNSselector(self, model, config_area, row, 'DNS server',
+        self.__DNS = DNSselector(self, model, config_area, row, 'DNS server',
                         DNSConfigurationrView.DNSproviders, 'DNS')
-        self.__handlers['DNS'] = h
 
         row = row + 1
-        h = DNSselector(self, model, config_area, row, 'Fallback DNS server',
-                        DNSConfigurationrView.DNSproviders, 'FallbackDNS')
-        self.__handlers['FallbackDNS'] = h
+        self.__DNSFallback = DNSselector(self, model, config_area, row,
+                                         'Fallback DNS server',
+                                         DNSConfigurationrView.DNSproviders,
+                                         'FallbackDNS')
 
         row = row + 1
-        h = EnumSelector(self, model, config_area, row, 'DNS over TLS',
-                         ['no', 'yes', 'opportunistic'], 'DNSOverTLS')
-        self.__handlers['DNSOverTLS'] = h
+        self.__DoT= EnumSelector(self, model, config_area, row, 'DNS over TLS',
+                                 ['no', 'yes', 'opportunistic'],
+                                 'DNSOverTLS')
 
         row = row + 1
-        h = EnumSelector(self, model, config_area, row, 'DNSSEC',
-                         ['no', 'yes', 'allow-downgrade'], 'DNSSEC',)
-        self.__handlers['DNSSEC'] = h
+        self.__DNSSEC = EnumSelector(self, model, config_area, row, 'DNSSEC',
+                                     ['no', 'yes', 'allow-downgrade'],
+                                     'DNSSEC',)
 
         row = row + 1
         self.__b_apply = QPushButton(text="Apply")
@@ -567,7 +568,6 @@ if __name__ == '__main__':
     model = DNSConfigurationModel(args.config)
     app = QApplication(sys.argv)
     root_window = DNSConfigurationrView(model, config_fn=args.config,
-                                run_as_root=not args.no_root,
-                                script_path=os.path.abspath( __file__ ))
+                                run_as_root=not args.no_root)
     root_window.show()
     app.exec_()
