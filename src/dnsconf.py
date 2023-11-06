@@ -5,9 +5,12 @@ platforms.
 
 """
 
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import QMessageBox, QLabel, QLineEdit, QComboBox, QMainWindow, QApplication, QInputDialog, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QPushButton, QCheckBox
-from PyQt5.QtCore import *
+#from PyQt5.QtGui import *
+from PyQt5.QtWidgets import (QMessageBox, QLabel, QLineEdit, QComboBox,
+                             QMainWindow, QApplication, QInputDialog,
+                             QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
+                             QPushButton, QCheckBox)
+from PyQt5.QtCore import Qt, QCoreApplication
 
 import re
 import os
@@ -548,8 +551,14 @@ class DNSConfigurationrView(QMainWindow):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Display and modify settings '
-                                     'of the systemd DNS resolver0.')
+    description = """ Switch between DNS resolvers.
+
+The system will use either systemd-resolved or portmaster. The user can edit
+some of the systemd-resolved parameters.  Starting an stopping services and
+write access to the configuration file require root privileges. The
+application uses sudo to execute the operations and therefore queries the
+user's password.  """
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument('--config',
                         default='/etc/systemd/resolved.conf',
                         help='path of the conf file; defaults '
@@ -559,7 +568,7 @@ if __name__ == '__main__':
                         help='do not run as root; default is to run as root')
     parser.add_argument('--verbose',
                         action='store_true',
-                        help='Print debug info')
+                        help='print debug info')
     args = parser.parse_args()
 
     global verbose
