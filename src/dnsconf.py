@@ -5,11 +5,10 @@ platforms.
 
 """
 
-#from PyQt5.QtGui import *
 from PyQt5.QtWidgets import (QMessageBox, QLabel, QLineEdit, QComboBox,
                              QMainWindow, QApplication, QInputDialog,
                              QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
-                             QPushButton, QCheckBox, QGroupBox)
+                             QPushButton, QGroupBox)
 from PyQt5.QtCore import Qt, QCoreApplication
 
 import re
@@ -26,7 +25,9 @@ import sys                      # TODO Remove, use argparse
 #
 # TODO: Handle the error case that both resolvers are running.
 #
-# FIXME: Switching back and forth between resolvers does not work.
+# FIXME: Switching back and forth between resolvers does not work. Add a
+# method the the model to re-iitialise the model from configuration file
+# content and resolver status.
 #
 # FIXME: Handle failures in DNSConfigurationModel.save()
 #
@@ -52,7 +53,7 @@ class SystemCtl():
                              stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
-        output = p.communicate()
+        p.communicate()
         print("Return code", p.returncode)
         return p.returncode
 
@@ -405,6 +406,15 @@ class DNSConfigurationrView(QMainWindow):
             self.__b_close.setFocus()
 
 
+    def __updateDisplayedResolver(self):
+        """ Update the check mark of the group boxes to reflect the currently active
+        resolver.
+        """
+        resolver = self.__model.resolver()
+        self.__sysd_group.setChecked(resolver == SystemCtl.SVC_SYSTEMD_RESOLVED)
+        self.__portmaster.setChecked(resolver == SystemCtl.SVC_PORTMASTER)
+
+
     def __on_apply(self):
         """
         Called when the 'apply' button is pressed.
@@ -430,11 +440,11 @@ class DNSConfigurationrView(QMainWindow):
                     self.__model.save(self.__config_fn, self.__run_as_root, self.__password)
                 else:
                     if verbose: print("No password specified")
-                self.on_value_changed()
             else:
                 # Run as normal user
                 self.__model.save(self.__config_fn, self.__run_as_root)
-                self.on_value_changed()
+            self.__updateDisplayedResolver()
+            self.on_value_changed()
             self.unsetCursor()
         else:
             if verbose: print("... nothing changed")
