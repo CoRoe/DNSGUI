@@ -9,7 +9,7 @@ platforms.
 from PyQt5.QtWidgets import (QMessageBox, QLabel, QLineEdit, QComboBox,
                              QMainWindow, QApplication, QInputDialog,
                              QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
-                             QPushButton, QCheckBox)
+                             QPushButton, QCheckBox, QGroupBox)
 from PyQt5.QtCore import Qt, QCoreApplication
 
 import re
@@ -78,7 +78,7 @@ class SystemCtl():
                                  stderr=subprocess.PIPE)
             output = p.communicate()
         if p.returncode != 0:
-            QMessageBox.showerror("Error", output[1])
+            QMessageBox.critical(None, "Error", str(output[1]))
             return False
 
         return True
@@ -162,7 +162,8 @@ class DNSConfigurationModel():
                     QMessageBox.critical(None, "Error", msg)
 
             else:
-                os.copy(tmp_fn, conf_fn)
+                #os.copy(tmp_fn, conf_fn)
+                os.system('cp ' + tmp_fn + ' ' + conf_fn)
 
         except IOError as e:
             print("Cannot open", e)
@@ -311,7 +312,7 @@ class DNSselector():
 
 class EnumSelector():
     """Wrapper class for a list widget.
-    
+
     When the user changes the selection, the wrapper updates the model and
     calls an 'on change' callback of the parent object.
 
@@ -464,20 +465,19 @@ class DNSConfigurationrView(QMainWindow):
             self.__on_close()
 
 
-    def __on_systemd_resolver_changed(self, x):
-        s = self.__systemd_resolver.checkState()
-        print("Systemd resolver clicked", s)
-        if s:
+    def __on_systemd_resolver_changed(self, check_state):
+        print("Systemd resolver clicked: ", check_state)
+        if check_state:
             self.__portmaster.setChecked(False)
             self.__model.setResolver(SystemCtl.SVC_SYSTEMD_RESOLVED)
             self.on_value_changed()
 
 
-    def __on_portmaster_changed(self, x):
-        s = self.__portmaster.checkState()
-        print("Portmaster clicked", s)
-        if s:
-            self.__systemd_resolver.setChecked(False)
+    def __on_portmaster_changed(self, checkState):
+        #checkState = self.__portmaster.checkState()
+        print("Portmaster clicked:", checkState)
+        if checkState:
+            self.__sysd_group.setChecked(False)
             self.__model.setResolver(SystemCtl.SVC_PORTMASTER)
             self.on_value_changed()
 
@@ -491,16 +491,10 @@ class DNSConfigurationrView(QMainWindow):
 
         self.setWindowTitle("DNS Configuration")
 
-        main_layout = QVBoxLayout()
-        config_area = QGridLayout()
-        button_area = QHBoxLayout()
         widget = QWidget()
 
-        self.__systemd_resolver = QCheckBox("Systemd Resolver", widget)
-        if model.resolver() == SystemCtl.SVC_SYSTEMD_RESOLVED:
-            self.__systemd_resolver.setChecked(True)
-        self.__systemd_resolver.stateChanged.connect(self.__on_systemd_resolver_changed)
-        main_layout.addWidget(self.__systemd_resolver)
+        main_layout = QVBoxLayout()
+        sysd_grid = QGridLayout()
 
         # Create the wrapper objects of the widgets.
         #
@@ -508,26 +502,46 @@ class DNSConfigurationrView(QMainWindow):
         # they weren't, garbage collection would free the objects and the
         # widgets won't work properly.
         row = 0
-        self.__DNS = DNSselector(self, model, config_area, row, 'DNS server',
+        self.__DNS = DNSselector(self, model, sysd_grid, row, 'DNS server',
                         DNSConfigurationrView.DNSproviders, 'DNS')
 
         row = row + 1
-        self.__DNSFallback = DNSselector(self, model, config_area, row,
+        self.__DNSFallback = DNSselector(self, model, sysd_grid, row,
                                          'Fallback DNS server',
                                          DNSConfigurationrView.DNSproviders,
                                          'FallbackDNS')
 
         row = row + 1
-        self.__DoT= EnumSelector(self, model, config_area, row, 'DNS over TLS',
+        self.__DoT= EnumSelector(self, model, sysd_grid, row, 'DNS over TLS',
                                  ['no', 'yes', 'opportunistic'],
                                  'DNSOverTLS')
 
         row = row + 1
-        self.__DNSSEC = EnumSelector(self, model, config_area, row, 'DNSSEC',
+        self.__DNSSEC = EnumSelector(self, model, sysd_grid, row, 'DNSSEC',
                                      ['no', 'yes', 'allow-downgrade'],
                                      'DNSSEC',)
 
-        row = row + 1
+        self.__sysd_group = QGroupBox("Systemd-resolved", widget)
+        self.__sysd_group.setCheckable(True)
+        if model.resolver() == SystemCtl.SVC_SYSTEMD_RESOLVED:
+            self.__sysd_group.setChecked(True)
+        else:
+            self.__sysd_group.setChecked(False)
+        self.__sysd_group.toggled.connect(self.__on_systemd_resolver_changed)
+        self.__sysd_group.setLayout(sysd_grid)
+        main_layout.addWidget(self.__sysd_group)
+
+        self.__portmaster = QGroupBox("Portmaster", widget)
+        self.__portmaster.setCheckable(True)
+        if model.resolver() == SystemCtl.SVC_PORTMASTER:
+            self.__portmaster.setChecked(True)
+        else:
+            self.__portmaster.setChecked(False)
+        self.__portmaster.toggled.connect(self.__on_portmaster_changed)
+
+        main_layout.addWidget(self.__portmaster)
+
+        button_area = QHBoxLayout()
         self.__b_apply = QPushButton(text="Apply")
         self.__b_apply.clicked.connect(self.__on_apply)
         button_area.addWidget(self.__b_apply)
@@ -535,15 +549,6 @@ class DNSConfigurationrView(QMainWindow):
         self.__b_close = QPushButton(text="Close")
         self.__b_close.clicked.connect(self.__on_close)
         button_area.addWidget(self.__b_close)
-
-        main_layout.addLayout(config_area)
-
-        self.__portmaster = QCheckBox("Portmaster", widget)
-        if model.resolver() == SystemCtl.SVC_PORTMASTER:
-            self.__portmaster.setChecked(True)
-        self.__portmaster.stateChanged.connect(self.__on_portmaster_changed)
-
-        main_layout.addWidget(self.__portmaster)
 
         main_layout.addLayout(button_area)
         widget.setLayout(main_layout)
