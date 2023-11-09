@@ -15,21 +15,14 @@ import re
 import os
 import subprocess
 import argparse
-import sys                      # TODO Remove, use argparse
+import sys                      # TODO: Remove, use argparse
+from DistUpgrade import DistUpgradeFetcherSelf
 
 #
 # TODO Don't rewrite the configuration file if only the local resolver has
 # changed.
 #
-# TODO: RETURN key
-#
 # TODO: Handle the error case that both resolvers are running.
-#
-# FIXME: Switching back and forth between resolvers does not work. Add a
-# method the the model to re-iitialise the model from configuration file
-# content and resolver status.
-#
-# FIXME: Handle failures in DNSConfigurationModel.save()
 #
 # TODO: Allow white space around the '=' signs in the configuration file.
 #
@@ -59,11 +52,11 @@ class SystemCtl():
 
 
     @classmethod
-    def startOrStop(cls, command, service, password=None):
+    def startOrStop(cls, command, service, password=None) -> bool:
         """ Starts or stops a systemctl service. If a password is specified
             then sudo is used and the password is piped into sudo.
         """
-        assert(command in ('start', 'stop'))
+        assert(command in ('start', 'stop', 'restart'))
         print("startOrStop", command, service)
         if password:
             p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
@@ -93,35 +86,144 @@ class DNSConfigurationModel():
         files and systemd service status.
         """
 
+        self.__conf_fn = conf_fn
+        self.__systemdResolvedParams = {}
+
+        self.__readResolverStatus()
+        self.__readSysdResolvedConfiguration()
+
+        self.__resolver0 = self.__resolver
+        self.__systemdResolvedParams0 = self.__systemdResolvedParams.copy()
+
+
+    def __readResolverStatus(self):
+        """ Get the status of the resolver services and store it in the model."""
         if SystemCtl.status(SystemCtl.SVC_SYSTEMD_RESOLVED) == 0:
-            self.__resolver0 = SystemCtl.SVC_SYSTEMD_RESOLVED
+            self.__resolver = SystemCtl.SVC_SYSTEMD_RESOLVED
         elif SystemCtl.status(SystemCtl.SVC_PORTMASTER) == 0:
-            self.__resolver0 = SystemCtl.SVC_PORTMASTER
+            self.__resolver = SystemCtl.SVC_PORTMASTER
         else:
-            self.__resolver0 = None
+            self.__resolver = None
+        return True
 
-        self.__params0 = {}
 
+    def __readSysdResolvedConfiguration(self):
+        """ Read the systemd-resolved configuration file and store
+        its values in the model."""
         try:
-            with open(conf_fn, 'r') as ifile:
+            with open(self.__conf_fn, 'r') as ifile:
                 for line in ifile:
-                    # Extract key and value.
+                    # Extract key and getSystemdResolvedParameter.
                     try:
                         m = re.match('^([A-Za-z]+)=([a-z0-9.-]+)', line[:-1])
                         if m:
                             key = m.group(1)
                             value = m.group(2)
-                            self.__params0[key] = value
+                            self.__systemdResolvedParams[key] = value
                     except re.error as e:
                         print("RE problem", e)
         except IOError as e:
-            print("Cannot open", conf_fn, e)
+            print("Cannot open", self.__conf_fn, e)
+        return True
 
-        self.__resolver = self.__resolver0
-        self.__params = self.__params0.copy()
+
+    def __saveSysdResolvedConfiguration(self, run_as_root, password=None) -> bool:
+        """ Save the systemd-resolved configuration in a file.
+        Copies the content of the configuration file to a temporary file,
+        replacing the changed values. After that, the temporary file
+        is copied to the configuration file; this requires root privileges.
+        """
+        tmp_fn = '/tmp/resolv.conf'
+
+        if run_as_root: assert(password)
+
+        print("DNSConfigurationModel.save")
+        try:
+            with open(self.__conf_fn, 'r') as f_in:
+                with open(tmp_fn, 'w') as f_out:
+                    updated_vars = set()
+                    for line in f_in:
+                        m = re.match('^([A-Za-z]+)=', line)
+                        if m:
+                            var = m.group(1)
+                            if var in self.__systemdResolvedParams:
+                                f_out.write(
+                                      "{}={}\n".format(var, self.__systemdResolvedParams[var]))
+                                updated_vars.add(var)
+                            else:
+                                f_out.write(line)
+                        else:
+                            f_out.write(line)
+                    # resolved.conf might not define all
+                    for var in self.__systemdResolvedParams:
+                        if not var in updated_vars:
+                            if verbose: print("Missing:", var)
+                            f_out.write(
+                                      "{}={}\n".format(var,
+                                                       self.__systemdResolvedParams[var]))
+            if run_as_root:
+                x = DNSConfigurationModel.runShellCommandAsRoot(password, 'cp', tmp_fn, self.__conf_fn)
+                if x:
+                    msg = "Could not update '{}'; copy process terminated with {}".format(self.__conf_fn, x)
+                    QMessageBox.critical(None, "Error", msg)
+                return x == 0
+
+            else:
+                s = os.system('cp ' + tmp_fn + ' ' + self.__conf_fn)
+                return s == 0
+
+        except IOError as e:
+            print("Cannot open", e)
+            return False
+
+
+    def __startStopResolvers(self, password):
+        if not self.__resolver == self.__resolver0:
+            print("Starting systemctl ...")
+            if self.__resolver == SystemCtl.SVC_SYSTEMD_RESOLVED:
+                s = SystemCtl.startOrStop('stop', SystemCtl.SVC_PORTMASTER, password)
+                if not s: return False
+                s = SystemCtl.startOrStop('start', SystemCtl.SVC_SYSTEMD_RESOLVED, password)
+                if not s: return False
+            elif self.__resolver == SystemCtl.SVC_PORTMASTER:
+                s = SystemCtl.startOrStop('stop', SystemCtl.SVC_SYSTEMD_RESOLVED, password)
+                if not s: return False
+                s = SystemCtl.startOrStop('start', SystemCtl.SVC_PORTMASTER, password)
+                if not s: return False
+            print("... finished")
+        return True
 
 
     def save(self, conf_fn, run_as_root, password=None):
+        """ Save modified parameters to the configuration file and stop/start DNS
+        resolvers as specified. """
+        # FIXME: Check error status. The savexxx methods already show message
+        # boxes on error.
+        if self.__systemdResolvedParams != self.__systemdResolvedParams0:
+            s = self.__saveSysdResolvedConfiguration(run_as_root, password)
+            assert(s in (True, False))
+            if s and self.__resolver == SystemCtl.SVC_SYSTEMD_RESOLVED:
+                s = SystemCtl.startOrStop('restart', SystemCtl.SVC_SYSTEMD_RESOLVED, password)
+                assert(s in (True, False))
+                if s:
+                    self.__systemdResolvedParams0 = self.__systemdResolvedParams.copy()
+
+        if self.__resolver != self.__resolver0:
+            s = self.__startStopResolvers(password)
+            assert(s in (True, False))
+            if s:
+                self.__resolver0 = self.__resolver
+
+        # To be on the safe side read the services status:
+        if SystemCtl.status(SystemCtl.SVC_SYSTEMD_RESOLVED) == 0:
+            self.__resolver = SystemCtl.SVC_SYSTEMD_RESOLVED
+        elif SystemCtl.status(SystemCtl.SVC_PORTMASTER) == 0:
+            self.__resolver = SystemCtl.SVC_PORTMASTER
+        else:
+            self.__resolver = None
+
+
+    def save_unused(self, conf_fn, run_as_root, password=None):
         """ Save the changed data to the configuration file.
 
         Copies the content of the configuration file to a temporary file,
@@ -141,23 +243,23 @@ class DNSConfigurationModel():
                         m = re.match('^([A-Za-z]+)=', line)
                         if m:
                             var = m.group(1)
-                            if var in self.__params:
+                            if var in self.__systemdResolvedParams:
                                 f_out.write(
-                                      "{}={}\n".format(var, self.__params[var]))
+                                      "{}={}\n".format(var, self.__systemdResolvedParams[var]))
                                 updated_vars.add(var)
                             else:
                                 f_out.write(line)
                         else:
                             f_out.write(line)
                     # resolved.conf might not define all
-                    for var in self.__params:
+                    for var in self.__systemdResolvedParams:
                         if not var in updated_vars:
                             if verbose: print("Missing:", var)
                             f_out.write(
                                       "{}={}\n".format(var,
-                                                       self.__params[var]))
+                                                       self.__systemdResolvedParams[var]))
             if run_as_root:
-                x = DNSConfigurationModel.commandAsRoot(password, 'cp', tmp_fn, conf_fn)
+                x = DNSConfigurationModel.runShellCommandAsRoot(password, 'cp', tmp_fn, conf_fn)
                 if x:
                     msg = "Could not update '{}'; copy process terminated with {}".format(conf_fn, x)
                     QMessageBox.critical(None, "Error", msg)
@@ -189,14 +291,14 @@ class DNSConfigurationModel():
 
         # Values saved, set status to 'not modified'
         self.__resolver0 = self.__resolver
-        self.__params0 = self.__params.copy()
+        self.__systemdResolvedParams0 = self.__systemdResolvedParams.copy()
 
 
-    def is_modified(self):
+    def isModified(self):
         """ Check if the model is modified. """
-        print("DNSConfigurationModel.is_modified")
+        print("DNSConfigurationModel.isModified")
         print('resolver0 =', self.__resolver0, 'resolver =', self.__resolver)
-        return not (self.__resolver == self.__resolver0 and self.__params == self.__params0)
+        return not (self.__resolver == self.__resolver0 and self.__systemdResolvedParams == self.__systemdResolvedParams0)
 
 
     def resolver(self):
@@ -210,19 +312,21 @@ class DNSConfigurationModel():
         self.__resolver = resolver
 
 
-    def value(self, key):
-        """ Return the parameter value of associated with 'key'. """
-        if key in self.__params:
-            return self.__params[key]
+    def getSystemdResolvedParameter(self, key):
+        """ Return the parameter getSystemdResolvedParameter of associated with 'key'. """
+        if key in self.__systemdResolvedParams:
+            return self.__systemdResolvedParams[key]
         else:
             return None
 
-    def setValue(self, key, value):
-        """ Set the parameter value of associated with 'key'. """
-        self.__params[key] = value
+
+    def setResolvedParameter(self, key, value):
+        """ Set the parameter getSystemdResolvedParameter of associated with 'key'. """
+        self.__systemdResolvedParams[key] = value
+
 
     @classmethod
-    def commandAsRoot(cls, password, cmd, *args):
+    def runShellCommandAsRoot(cls, password, cmd, *args):
         """ Run a shell command as root.
         """
         execargs = ['/usr/bin/sudo', '-S', '-p', '']
@@ -246,41 +350,49 @@ class DNSselector():
     The combobox allows for selecting a DNS provider (such as Google or Quad9)
     or manually entering an IPv4 address in dotted notation.
     """
-    def __init__(self, parent, model, layout, row, text, values, key):
+    def __init__(self, view, model, layout, row, text, values, key):
 
-        self.__parent = parent
+        assert(type(view) == DNSConfigurationrView)
+        self.__view = view
+        assert(type(model) == DNSConfigurationModel)
         self.__model = model
+        assert(type(key) == str)
         self.__key = key
+        assert(type(values) == list)
         self.__values = values
 
-        ip = model.value(key)
-        provider = self.__provider_from_ip(ip)
+        ip = model.getSystemdResolvedParameter(key)
+        provider = self.__providerFromIp(ip)
 
         # Creates a label with the explanatory text, an option menu (to select
         # the DNS provider), and an entry field (chosen IP address)
         label = QLabel(text)
         layout.addWidget(label, row, 1)
 
-        self.__servers_combo = QComboBox(parent)
+        self.__servers_combo = QComboBox(view)
         self.__servers_combo.addItems([q[0] for q in values])
         self.__servers_combo.setCurrentText(provider)
-        self.__servers_combo.currentTextChanged.connect(self.on_server_changed)
+        self.__servers_combo.currentTextChanged.connect(self.__onProviderChanged)
         layout.addWidget(self.__servers_combo, row, 2)
 
-        self.__ipaddr_entry = QLineEdit(parent)
+        self.__ipaddr_entry = QLineEdit(view)
         self.__ipaddr_entry.setText(ip)
-        self.__ipaddr_entry.textEdited.connect(self.on_ip_changed)
+        self.__ipaddr_entry.textEdited.connect(self.__onIpChanged)
         layout.addWidget(self.__ipaddr_entry, row, 3)
 
 
-    def __provider_from_ip(self, ip):
+    def __providerFromIp(self, ip):
+        """ Given an IP address return the provider name. Return 'Other' if no
+        matching IP address is found."""
         for pair in self.__values:
             if pair[1] == ip:
                 return pair[0]
         return 'Other'
 
+
     # Given a provide name return the IP address
-    def __ip_from_provider(self, prov):
+    def __ipFromProvider(self, prov):
+        """ Given an provider name return the IP address of its nameserver. """
         for pair in self.__values:
             if pair[0] == prov:
                 return pair[1]
@@ -288,27 +400,27 @@ class DNSselector():
 
     # Invoked when the user selects a new server. The method updates the IP
     # address accordingly.
-    def on_server_changed(self, server):
+    def __onProviderChanged(self, server):
         """ Called by a server selection widget when the selection has changed.
 
-        Notifies the parent of the change.
+        Notifies the view of the change.
         """
         print('DNSselector: On server changed; new server is', server)
         if not server == 'Other':
-            ipaddr = self.__ip_from_provider(server)
+            ipaddr = self.__ipFromProvider(server)
             self.__ipaddr_entry.setText(ipaddr)
-            self.__model.setValue(self.__key, ipaddr)
-            self.__parent.on_value_changed()
+            self.__model.setResolvedParameter(self.__key, ipaddr)
+            self.__view.updateButtonStatus()
 
 
     # Invoked when the IP address might have changed. The method updates the
     # server name according ly.
-    def on_ip_changed(self, ip):
+    def __onIpChanged(self, ip):
         print("DNSselector: on ip changed; new ip is", ip)
-        provider = self.__provider_from_ip(ip)
+        provider = self.__providerFromIp(ip)
         self.__servers_combo.setCurrentText(provider)
-        self.__model.setValue(self.__key, ip)
-        self.__parent.on_value_changed()
+        self.__model.setResolvedParameter(self.__key, ip)
+        self.__view.updateButtonStatus()
 
 
 class EnumSelector():
@@ -320,35 +432,35 @@ class EnumSelector():
     """
     def __init__(self, parent, model, layout, row, text, values, key):
 
-        self.__parent = parent
+        self.__view = parent
         self.__model = model
         self.__key = key
         self.__values = values
 
-        # The initial value. Its purpose is to track if the actual value of
+        # The initial getSystemdResolvedParameter. Its purpose is to track if the actual getSystemdResolvedParameter of
         # the setting is has been modified and needs to be saved.
         #
         # - Initialised to the 1st element of the 'values' parameter of the
         #   constructor.
         #
-        # - Updated to the current value when the configuration file is saved.
+        # - Updated to the current getSystemdResolvedParameter when the configuration file is saved.
         self.__value0 = values[0]
 
         self.__label = QLabel(text)
         layout.addWidget(self.__label, row, 1)
         self.__value_combo = QComboBox(parent)
 
-        # Initialise with the 1st value of the list of valid values:
+        # Initialise with the 1st getSystemdResolvedParameter of the list of valid values:
         layout.addWidget(self.__value_combo, row, 2)
         self.__value_combo.addItems(values)
-        self.__value_combo.setCurrentText(self.__model.value(key))
-        self.__value_combo.currentIndexChanged.connect(self.__on_value_changed)
+        self.__value_combo.setCurrentText(self.__model.getSystemdResolvedParameter(key))
+        self.__value_combo.currentIndexChanged.connect(self.__onValueChanged)
 
 
-    def __on_value_changed(self, index):
-        print("EnumSelector.on_value_changed:", self.__key, self.__values[index], index)
-        self.__model.setValue(self.__key, self.__values[index])
-        self.__parent.on_value_changed()
+    def __onValueChanged(self, index):
+        print("EnumSelector.updateButtonStatus:", self.__key, self.__values[index], index)
+        self.__model.setResolvedParameter(self.__key, self.__values[index])
+        self.__view.updateButtonStatus()
 
 
 class DNSConfigurationrView(QMainWindow):
@@ -364,7 +476,7 @@ class DNSConfigurationrView(QMainWindow):
     #   festellen zu können, sowohl den initialen Wert (Methode set()) und den
     #   momentanen Wert (steht im Widget) merken.
     #
-    # - is_modified() vergleicht den momentanen und den initialen Wert.
+    # - isModified() vergleicht den momentanen und den initialen Wert.
 
     DNSproviders = [['Quad9',      '9.9.9.9'],
                     ['DNSforge',   '176.9.93.198'],
@@ -384,43 +496,45 @@ class DNSConfigurationrView(QMainWindow):
         self.__model = model
         self.__password = None
 
-        self.__create_widgets(model)
-        self.on_value_changed()             # Convenient way to set button status
+        self.__createWidgets(model)
+        self.updateButtonStatus()             # Convenient way to set button status
 
 
-    def on_value_changed(self):
+    def updateButtonStatus(self):
         """ Update 'apply' and 'close buttens according to the state of
         the model.
 
         Widgets should call this methon after each user interaction.
         """
-        m = self.__model.is_modified()
+        m = self.__model.isModified()
         if verbose: print("Value of some widget has changed!", m)
         if m:
             # Modified, enable 'apply' button and set focus to it.
             self.__b_apply.setEnabled(True)
+            self.__b_apply.setDefault(True)
             self.__b_apply.setFocus()
         else:
             # Nothing modified; disable 'apply' button and set focus to 'close'.
             self.__b_apply.setEnabled(False)
+            self.__b_apply.setDefault(True)
             self.__b_close.setFocus()
 
 
     def __updateDisplayedResolver(self):
         """ Update the check mark of the group boxes to reflect the currently active
-        resolver.
+        resolver. The info is retrieved from the model.
         """
         resolver = self.__model.resolver()
         self.__sysd_group.setChecked(resolver == SystemCtl.SVC_SYSTEMD_RESOLVED)
         self.__portmaster.setChecked(resolver == SystemCtl.SVC_PORTMASTER)
 
 
-    def __on_apply(self):
+    def __onApply(self):
         """
         Called when the 'apply' button is pressed.
         """
 
-        if self.__model.is_modified():
+        if self.__model.isModified():
             print("... something changed")
             self.setCursor(Qt.WaitCursor)
             if self.__run_as_root:
@@ -444,19 +558,17 @@ class DNSConfigurationrView(QMainWindow):
                 # Run as normal user
                 self.__model.save(self.__config_fn, self.__run_as_root)
             self.__updateDisplayedResolver()
-            self.on_value_changed()
+            self.updateButtonStatus()
             self.unsetCursor()
         else:
             if verbose: print("... nothing changed")
 
 
-
-
-    def __on_close(self):
+    def __onClose(self):
         """
         Close button pressed
         """
-        if self.__model.is_modified():
+        if self.__model.isModified():
             answer = QMessageBox.question(self,
                                           'Exit Application',
                                            'Discard changes?',
@@ -468,38 +580,33 @@ class DNSConfigurationrView(QMainWindow):
             QCoreApplication.quit()
 
 
-    def __on_return_event(self, event):
-        if event.widget == self.__b_apply:
-            self.__on_apply()
-        elif event.widget == self.__b_close:
-            self.__on_close()
-
-
-    def __on_systemd_resolver_changed(self, check_state):
+    def __onSystemdResolverToggled(self, check_state):
+        """ Called when the user toggle the 'systemd-resolved' check mark."""
         print("Systemd resolver clicked: ", check_state)
         if check_state:
             self.__portmaster.setChecked(False)
             self.__model.setResolver(SystemCtl.SVC_SYSTEMD_RESOLVED)
-            self.on_value_changed()
+            self.updateButtonStatus()
 
 
-    def __on_portmaster_changed(self, checkState):
+    def __onPortmasterToggled(self, checkState):
+        """ Called when the user toggle the 'portmaster' check mark."""
         #checkState = self.__portmaster.checkState()
         print("Portmaster clicked:", checkState)
         if checkState:
             self.__sysd_group.setChecked(False)
             self.__model.setResolver(SystemCtl.SVC_PORTMASTER)
-            self.on_value_changed()
+            self.updateButtonStatus()
 
 
     #
     # Create the widgets and initialise them with the values read from the
     # conf file.
     #
-    def __create_widgets(self, model):
+    def __createWidgets(self, model):
         assert(type(model) == DNSConfigurationModel)
 
-        self.setWindowTitle("DNS Configuration")
+        self.setWindowTitle("DNS Resolver Configuration")
 
         widget = QWidget()
 
@@ -537,7 +644,7 @@ class DNSConfigurationrView(QMainWindow):
             self.__sysd_group.setChecked(True)
         else:
             self.__sysd_group.setChecked(False)
-        self.__sysd_group.toggled.connect(self.__on_systemd_resolver_changed)
+        self.__sysd_group.toggled.connect(self.__onSystemdResolverToggled)
         self.__sysd_group.setLayout(sysd_grid)
         main_layout.addWidget(self.__sysd_group)
 
@@ -547,17 +654,18 @@ class DNSConfigurationrView(QMainWindow):
             self.__portmaster.setChecked(True)
         else:
             self.__portmaster.setChecked(False)
-        self.__portmaster.toggled.connect(self.__on_portmaster_changed)
+        self.__portmaster.toggled.connect(self.__onPortmasterToggled)
 
         main_layout.addWidget(self.__portmaster)
 
         button_area = QHBoxLayout()
-        self.__b_apply = QPushButton(text="Apply")
-        self.__b_apply.clicked.connect(self.__on_apply)
+        self.__b_apply = QPushButton(widget, text="Apply")
+        self.__b_apply.clicked.connect(self.__onApply)
         button_area.addWidget(self.__b_apply)
 
-        self.__b_close = QPushButton(text="Close")
-        self.__b_close.clicked.connect(self.__on_close)
+        self.__b_close = QPushButton(widget, text="Close")
+        self.__b_close.setDefault(True)
+        self.__b_close.clicked.connect(self.__onClose)
         button_area.addWidget(self.__b_close)
 
         main_layout.addLayout(button_area)
