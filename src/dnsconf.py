@@ -11,12 +11,12 @@ from PyQt5.QtWidgets import (QMessageBox, QLabel, QLineEdit, QComboBox,
                              QPushButton, QGroupBox)
 from PyQt5.QtCore import Qt, QCoreApplication
 
-import re
+import regex as re
 import os
 import subprocess
 import argparse
-import sys                      # TODO: Remove, use argparse
-from DistUpgrade import DistUpgradeFetcherSelf
+import sys
+
 
 #
 # TODO Don't rewrite the configuration file if only the local resolver has

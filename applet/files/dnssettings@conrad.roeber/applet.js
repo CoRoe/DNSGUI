@@ -1,3 +1,7 @@
+/*
+ * Applet installation
+ */
+
 const Applet = imports.ui.applet;
 const Util = imports.misc.util;
 

@@ -1,12 +1,17 @@
-# GUI Configuration of DNS Resolution #
+# GUI Configuration of DNS Resolution
 
 ## Overview
 
-This project is a simple GUI interface to the parameters of the DNS resolver
-that is part of systemd. It is handy for instance when having to go through a
-captive portal that the secure DNS queries.
+This project is a simple GUI interface for controlling the DNS resolvers
+running on a Linux platform. It assumes that you have two different resolvers
+installed, and that these resolvers can be started and stopped using systemd:
 
-It contains two components:
+* systemd-resolved, a daemon that comes with systemd. Its configuration
+  parameters are */etc/systemd/resolved.conf*.
+
+* portmaster. It is configured via a GUI.
+
+The configuration utility contains two components:
 
   * A GUI written in PyQt5 (*/usr/local/bin/dnsconf.py*); it is
     essentially an editor for the configuration file
