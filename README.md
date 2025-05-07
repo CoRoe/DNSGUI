@@ -25,15 +25,30 @@ The configuration utility contains two components:
 The applet runs on the Cinnamon desktop and interacts with systemd to switch
 between Portmaster dn the system DNS resolver.
 
-## Installation
+## Applet Installation
 
 Call *install.sh*; the shell script copies the Java Scipt and JSON files in
 applet/files/${APPLET} to /usr/share/cinnamon/applets/${APPLET}, where
 ${APPLET} is *dnssetting@conrad.roeber*, the applet's UUID.
 
+## Development
+
+The project comes preconfigured for dependency management with
+`Poetry` (https://python-poetry.org/).
+
+- Install the `python3-poetry` package.
+
+- Run `poetry install --no-root` to install the dependencies.
+
+- To activate the environment: `poetry env activate`
+
 ## Debugging
 
-Press Alt-F2 to enter the Cinnamon debugger; in the prompt type 'lg'.
+### Cinnamon Integration
+
+Press Alt-F2 to enter the Cinnamon debugger; in the prompt type `lg`.
+
+### Eclipse
 
 ## Limitations
 

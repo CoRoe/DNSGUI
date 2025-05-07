@@ -53,20 +53,21 @@ class SystemCtl():
 
     @classmethod
     def startOrStop(cls, command, service, password=None) -> bool:
-        """ Starts or stops a systemctl service. If a password is specified
+        """ Enables or disables a systemctl service. If a password is specified
             then sudo is used and the password is piped into sudo.
         """
         assert(command in ('start', 'stop', 'restart'))
-        print("startOrStop", command, service)
+        en_disable = 'enable' if command == 'start' else 'disable'
+        print("startOrStop", en_disable, '--now', service)
         if password:
             p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
-                                  'systemctl', command, service),
+                                  'systemctl', en_disable, '--now', service),
                                  stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             output = p.communicate(password.encode())
         else:
-            p = subprocess.Popen(('systemctl', command, service),
+            p = subprocess.Popen(('systemctl', en_disable, '--now', service),
                                  stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
