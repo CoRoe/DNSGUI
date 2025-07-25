@@ -16,7 +16,6 @@ import os
 import subprocess
 import argparse
 import sys
-from magic.compat import NONE
 
 
 #
@@ -28,6 +27,9 @@ from magic.compat import NONE
 
 
 class SystemdService():
+    """Wrapper class around systemd services.
+
+    A service is identified by its name."""
 
     # The two services managed by this application
     SVC_PORTMASTER = 'portmaster.service'
@@ -36,6 +38,9 @@ class SystemdService():
     @classmethod
     def status(cls, service: str) -> int:
         """ Queries the status of a service.
+
+        :param service: Name of the service.
+
         """
         print("Querying status of", service)
         p = subprocess.Popen(('/usr/bin/systemctl', 'status', service),
@@ -49,6 +54,14 @@ class SystemdService():
 
     @classmethod
     def activate(cls, service, password):
+        """Activate a service.
+
+        :param service: Name of the service.
+        :param password: The user's password.
+        :returns: True if both operations succeed and false else.
+
+        First enables and then starts a service.
+        """
         # First enable the service
         p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
                               'systemctl', 'enable', service),
@@ -75,6 +88,14 @@ class SystemdService():
 
     @classmethod
     def deactivate(cls, service, password):
+        """Deactivate a service.
+
+        :param service: Name of the service.
+        :param password: The user's password.
+        :returns: True if both operations succeed and false else.
+
+        First stops and then disables the service.
+        """
         # First stop the service
         p = subprocess.Popen(('/usr/bin/sudo', '-S', '-p', '',
                               'systemctl', 'stop', service),
@@ -107,7 +128,8 @@ class ResolvedConfig():
     a file, to set and get individual parameters, and to check if the configuration
     has been changed since it has been saved.
 
-    TODO: Do we need conf0?
+    The code tries to keep the original file structure: The order of entries is preserved, and
+    comments are kept.
     """
 
     def __init__(self, conf_fn, run_as_root):
@@ -115,11 +137,6 @@ class ResolvedConfig():
         self.__run_as_root = run_as_root
         self.__conf = self.__read_from_file()
         self.__conf0 = self.__conf.copy()
-
-
-    def params(self):
-        """Return the systemd-resolved configuration parameters."""
-        return self.__conf
 
 
     @classmethod
@@ -215,20 +232,13 @@ class ResolvedConfig():
             return False
 
 
-    def getSystemdResolvedParameter(self, key):
-        """ Return the parameter associated with 'key'. """
-        if key in self.__conf:
-            return self.__conf[key]
-        else:
-            return None
-
-
-    def setResolvedParameter(self, key, value):
+    def setValue(self, key, value):
         """ Set the parameter associated with 'key'. """
         self.__conf[key] = value
 
 
     def value(self, key):
+        """Returns the parameter associated with 'key'."""
         try:
             value = self.__conf[key]
         except:
@@ -350,22 +360,21 @@ class DNSConfigurationModel():
         print(f"--> {self.__resolvers}")
 
 
-    def getDNSConf_unused(self, key):
-        if key in self.__systemdResolvedParams:
-            return self.__systemdResolvedParams[key]
-        else:
-            return None
-
-
     def getDNSConf(self, key):
+        """Get a parameter of the systemd resolver configuration.
+
+        :param key: The key of which the value should be returned.
+
+        The configuration is stored in a file, and this call gets the value of one of the
+        keys.
+        """
         value = self.__systemd_resolved_config.value(key)
         return value
 
 
-    def setResolvedParameter(self, key, value):
+    def setValue(self, key, value):
         print(f"SetResolvedParameter({key}, {value})")
-        #self.__systemdResolvedParams[key] = value
-        self.__systemd_resolved_config.setResolvedParameter(key, value)
+        self.__systemd_resolved_config.setValue(key, value)
 
 
 class DNSselector():
@@ -434,7 +443,7 @@ class DNSselector():
         if not server == 'Other':
             ipaddr = self.__ipFromProvider(server)
             self.__ipaddr_entry.setText(ipaddr)
-            self.__model.setResolvedParameter(self.__key, ipaddr)
+            self.__model.setValue(self.__key, ipaddr)
             self.__view.updateButtonStatus()
 
 
@@ -444,7 +453,7 @@ class DNSselector():
         print("DNSselector: on ip changed; new ip is", ip)
         provider = self.__providerFromIp(ip)
         self.__servers_combo.setCurrentText(provider)
-        self.__model.setResolvedParameter(self.__key, ip)
+        self.__model.setValue(self.__key, ip)
         self.__view.updateButtonStatus()
 
 
@@ -484,7 +493,7 @@ class EnumSelector():
 
     def __onValueChanged(self, index):
         print("EnumSelector.updateButtonStatus:", self.__key, self.__values[index], index)
-        self.__model.setResolvedParameter(self.__key, self.__values[index])
+        self.__model.setValue(self.__key, self.__values[index])
         self.__view.updateButtonStatus()
 
 
