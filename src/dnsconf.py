@@ -9,7 +9,8 @@ from PyQt5.QtWidgets import (QMessageBox, QLabel, QLineEdit, QComboBox,
                              QMainWindow, QApplication, QInputDialog,
                              QWidget, QGridLayout, QHBoxLayout, QVBoxLayout,
                              QPushButton, QGroupBox)
-from PyQt5.QtCore import Qt, QCoreApplication
+from PyQt5.QtCore import Qt, QCoreApplication, QByteArray, QObject, pyqtSlot
+from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 
 import regex as re
 import os
@@ -17,6 +18,7 @@ import subprocess
 import argparse
 import sys
 
+SERVER_NAME = "dnsconf-comm"
 
 #
 # TODO: Allow white space around the '=' signs in the configuration file.
@@ -25,6 +27,9 @@ import sys
 # values even when not present in resolved.conf.
 #
 
+#
+# FIXME: Dafür sorgen, dass nur eine Instanz existiert.
+#
 
 class SystemdService():
     """Wrapper class around systemd services.
@@ -712,6 +717,66 @@ class DNSConfigurationView(QMainWindow):
         self.__updateDisplayedResolver()
 
 
+    def bring_to_front(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+
+class SingleInstance(QObject):
+    def __init__(self, on_message_callback):
+        super().__init__()
+        self.on_message_callback = on_message_callback
+        self.server = QLocalServer()
+
+        # Remove stale socket (important on Linux)
+        QLocalServer.removeServer(SERVER_NAME)
+
+        self.server.newConnection.connect(self.handle_connection)
+        if not self.server.listen(SERVER_NAME):
+            raise RuntimeError("Unable to start local server")
+
+    @pyqtSlot()
+    def handle_connection(self):
+        socket = self.server.nextPendingConnection()
+        socket.readyRead.connect(lambda: self.read_socket(socket))
+
+    def read_socket(self, socket):
+        message = bytes(socket.readAll()).decode("utf-8")
+        self.on_message_callback(message)
+        socket.disconnectFromServer()
+
+
+def send_message_to_running_instance(message):
+    socket = QLocalSocket()
+    socket.connectToServer(SERVER_NAME)
+
+    if socket.waitForConnected(100):
+        # Waiting for a connection succeeds: Second instance.
+        socket.write(QByteArray(message.encode("utf-8")))
+        socket.flush()
+        socket.waitForBytesWritten(100)
+        socket.disconnectFromServer()
+        print(f"send_message_to_running_instance: True: Subsequent instance")
+        return True
+
+    else:
+        # Waiting for a connection fails: This is the first instance.
+        print(f"send_message_to_running_instance: False: First instance")
+        return False
+
+
+def handle_message(message):
+    if message == "raise":
+        print(f"handle_message({message})")
+        print(f"window = {root_window}")
+        root_window.bring_to_front()
+    else:
+        # Should not happen
+        print("Received message:", message)
+
+
+
 if __name__ == '__main__':
     description = """ Switch between DNS resolvers.
 
@@ -738,7 +803,13 @@ user's password.  """
 
     model = DNSConfigurationModel(args.config, not args.no_root)
     app = QApplication(sys.argv)
+
+    # Try to notify an existing instance
+    if send_message_to_running_instance("raise"):
+        sys.exit(0)
+
     root_window = DNSConfigurationView(model, config_fn=args.config,
                                 run_as_root=not args.no_root)
+    single_instance = SingleInstance(handle_message)
     root_window.show()
     app.exec_()
