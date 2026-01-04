@@ -9,3 +9,4 @@ cp src/dnsconf.py /usr/local/bin
 mkdir -p /usr/share/cinnamon/applets/${APPLET}
 cp applet/files/${APPLET}/*.js   /usr/share/cinnamon/applets/${APPLET}
 cp applet/files/${APPLET}/*.json /usr/share/cinnamon/applets/${APPLET}
+cp applet/dns-48.png             /usr/share/cinnamon/applets/${APPLET}
