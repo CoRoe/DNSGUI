@@ -12,7 +12,7 @@ class MyApplet extends Applet.TextIconApplet {
 
         // Custom icon (absolute path)
         this.set_applet_icon_path(
-            metadata.path + "/dns-48.png"
+            metadata.path + "/dnsgui.png"
         );
 
         this.set_applet_tooltip("Configure DNS resolver");

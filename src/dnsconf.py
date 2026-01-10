@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (QMessageBox, QLabel, QLineEdit, QComboBox,
                              QPushButton, QGroupBox)
 from PyQt5.QtCore import Qt, QCoreApplication, QByteArray, QObject, pyqtSlot
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
+from PyQt5.QtGui import QIcon
 
 import regex as re
 import os
@@ -776,7 +777,6 @@ def handle_message(message):
         print("Received message:", message)
 
 
-
 if __name__ == '__main__':
     description = """ Switch between DNS resolvers.
 
@@ -803,6 +803,9 @@ user's password.  """
 
     model = DNSConfigurationModel(args.config, not args.no_root)
     app = QApplication(sys.argv)
+    
+    # FIXME: No hard-coded icon path
+    app.setWindowIcon(QIcon("/usr/share/cinnamon/applets/dnssettings@conrad.roeber/dnsgui.png"))
 
     # Try to notify an existing instance
     if send_message_to_running_instance("raise"):
